@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MindLaw | Control Center</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['"Plus Jakarta Sans"', "sans-serif"], mono: ['"DM Mono"', "monospace"] },
+          colors: {
+            mindlaw: {
+              dark: "#001A1E",
+              teal: "#002228",
+              gold: "#C5A059",
+              white: "#FFFFFF"
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="min-h-screen bg-mindlaw-dark font-sans text-mindlaw-white antialiased dashboard-body">
+  <div id="toast" class="fixed right-5 top-5 z-50 hidden rounded-xl border border-mindlaw-gold/40 bg-mindlaw-teal px-4 py-3 text-sm font-semibold"></div>
+  <header class="sticky top-0 z-40 border-b border-white/5 bg-mindlaw-teal/85 backdrop-blur-md">
+    <div class="mx-auto flex max-w-[1600px] items-center justify-between gap-3 px-4 py-3 md:px-6">
+      <div class="flex items-center gap-3">
+        <button id="btn-menu-toggle" class="rounded-lg border border-white/10 px-3 py-2 text-sm font-semibold text-mindlaw-white hover:border-mindlaw-gold/40">Menu</button>
+        <img src="/mindlaw_fundo_escuro.svg" alt="MindLaw" class="h-9 w-9 object-contain" />
+      </div>
+      <div class="flex items-center gap-2">
+        <button id="btn-toggle-filters" class="rounded-lg border border-white/10 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] hover:border-mindlaw-gold/40">Filtros</button>
+      </div>
+    </div>
+    <div id="filters-panel" class="mx-auto hidden max-w-[1600px] px-4 pb-4 md:px-6">
+      <div class="panel border-t-2 border-mindlaw-gold p-3">
+        <div class="flex flex-wrap items-center gap-2">
+          <select id="filter-month" class="input-ui !min-h-10 !w-[120px] !py-2">
+            <option value="">Mes</option>
+          <option value="1">Jan</option><option value="2">Fev</option><option value="3">Mar</option>
+          <option value="4">Abr</option><option value="5">Mai</option><option value="6">Jun</option>
+          <option value="7">Jul</option><option value="8">Ago</option><option value="9">Set</option>
+          <option value="10">Out</option><option value="11">Nov</option><option value="12">Dez</option>
+          </select>
+          <input id="filter-year" type="number" min="2020" max="2100" placeholder="Ano" class="input-ui !min-h-10 !w-[100px] !min-w-[4.5rem] !py-2" title="4 digitos" />
+          <input id="filter-start" type="date" class="input-ui !min-h-10 !w-[145px] !py-2" />
+          <input id="filter-end" type="date" class="input-ui !min-h-10 !w-[145px] !py-2" />
+          <button id="btn-apply-filters" class="btn-gold !px-4 !py-2 text-xs uppercase tracking-[0.12em]">Aplicar</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="relative mx-auto flex min-h-[calc(100vh-70px)] w-full max-w-[1600px]">
+    <aside id="sidebar" class="sidebar-drawer fixed inset-y-0 left-0 z-50 w-[270px] border-r border-mindlaw-gold/20 bg-mindlaw-teal px-5 py-6">
+      <div class="mb-6 flex items-center justify-between">
+        <img src="/mindlaw_fundo_escuro.svg" alt="MindLaw" class="h-10 w-10 object-contain" />
+        <button id="btn-menu-close" class="rounded-lg border border-white/10 px-2 py-1 text-xs">Fechar</button>
+      </div>
+      <nav class="space-y-2">
+        <button id="nav-resumo" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Visao Geral</button>
+        <button id="nav-comercial" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Relatorio Comercial</button>
+        <button id="nav-suporte" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Relatorio de Suporte</button>
+        <button id="nav-lancamentos" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Centro de Lancamentos</button>
+        <button id="nav-clientes" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Clientes</button>
+        <button id="nav-logs" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Logs de Dados</button>
+      </nav>
+      <button id="btn-export" class="mt-6 w-full rounded-xl border border-mindlaw-gold/30 bg-mindlaw-gold/10 px-4 py-3 text-xs font-bold uppercase tracking-[0.12em] hover:bg-mindlaw-gold hover:text-mindlaw-dark">Gerar Planilha</button>
+      <button id="btn-logout" class="mt-3 w-full rounded-xl border border-mindlaw-gold/25 px-4 py-3 text-xs font-bold uppercase tracking-[0.12em] hover:bg-mindlaw-gold/10">Sair</button>
+    </aside>
+    <div id="drawer-backdrop" class="drawer-backdrop hidden"></div>
+
+    <main class="w-full p-6 pb-24 lg:p-10 lg:pb-10">
+      <section id="view-resumo" class="tab-view space-y-6">
+        <h2 class="text-3xl font-extrabold tracking-tight">Resumo Executivo</h2>
+        <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">Receita Ganha (Periodo)</p><p id="kpi-resumo-receita" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">R$ 0</p></article>
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">MRR Perdido (Periodo)</p><p id="kpi-resumo-mrr" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">R$ 0</p></article>
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">Churn Rate</p><p id="kpi-resumo-churn" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p></article>
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">NPS Score</p><p id="kpi-resumo-nps" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">0%</p></article>
+        </div>
+      </section>
+
+      <section id="view-comercial" class="tab-view space-y-6">
+        <h2 class="text-3xl font-extrabold tracking-tight">Dashboard Comercial</h2>
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">LTV Estimado</p><p id="kpi-ltv" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">R$ 0</p></article>
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">Taxa de Conversao</p><p id="kpi-conv" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">0%</p></article>
+        </div>
+        <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6"><h3 class="mb-4 text-lg font-semibold tracking-tight text-mindlaw-gold">Proporcao de Fechamento</h3><div class="h-72"><canvas id="chartFunnel"></canvas></div></article>
+          <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6"><h3 class="mb-4 text-lg font-semibold tracking-tight text-mindlaw-gold">Motivos de Perda</h3><div class="h-72"><canvas id="chartLoss"></canvas></div></article>
+        </div>
+      </section>
+
+      <section id="view-suporte" class="tab-view hidden space-y-6">
+        <h2 class="text-3xl font-extrabold tracking-tight">Dashboard de Suporte</h2>
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">Saude da Carteira (Churn)</p><p id="kpi-churn" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p></article>
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">Voz do Cliente (NPS Score)</p><p id="kpi-nps" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p></article>
+        </div>
+        <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
+          <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6"><h3 class="mb-4 text-lg font-semibold tracking-tight text-mindlaw-white/85">Saude da Carteira (Churn por Mes)</h3><div id="heatmap" class="grid grid-cols-6 gap-2 text-xs"></div></article>
+          <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6"><h3 class="mb-4 text-lg font-semibold tracking-tight text-mindlaw-white/85">Voz do Cliente (Distribuicao NPS)</h3><div class="h-72"><canvas id="chartNps"></canvas></div></article>
+        </div>
+      </section>
+
+      <section id="view-lancamentos" class="tab-view hidden space-y-6">
+        <h2 class="text-3xl font-extrabold tracking-tight">Centro de Lancamentos</h2>
+        <div class="flex flex-col gap-10">
+          <article class="panel border-t-2 border-mindlaw-gold p-6 space-y-4">
+            <h3 class="text-lg font-semibold">Formulario Comercial</h3>
+            <input id="sale_cliente" type="text" placeholder="Cliente" class="input-ui" />
+            <div class="grid grid-cols-2 gap-3">
+              <input id="sale_data" type="date" class="input-ui" />
+              <input id="sale_valor" type="number" step="0.01" placeholder="Valor Contrato" class="input-ui" />
+            </div>
+            <div class="grid grid-cols-2 gap-3">
+              <select id="sale_status" class="input-ui"><option value="Em Negociacao">Em Negociacao</option><option value="Ganho">Ganho</option><option value="Perdido">Perdido</option></select>
+              <select id="sale_motivo" class="input-ui"><option value="Sem Motivo">Sem Motivo</option><option value="Preco">Preco</option><option value="Falta de Funcionalidade">Falta de Funcionalidade</option><option value="Falta de Integracao">Falta de Integracao</option><option value="Outros">Outros</option></select>
+            </div>
+            <input id="sale_competidor" type="text" placeholder="Competidor" class="input-ui" />
+            <textarea id="sale_detalhe" rows="3" placeholder="Detalhamento tecnico" class="input-ui"></textarea>
+            <button id="btn-save-sale" class="btn-gold w-full">Salvar Comercial</button>
+          </article>
+
+          <article class="panel border-t-2 border-mindlaw-gold p-6 space-y-4">
+            <h3 class="text-lg font-semibold">Registro de Churn (Cancelamento)</h3>
+            <input id="churn_cliente" list="clients-options" type="text" placeholder="Cliente" class="input-ui" />
+            <div class="grid grid-cols-2 gap-3">
+              <input id="churn_data" type="date" class="input-ui" />
+              <input id="churn_valor_mensal" type="number" step="0.01" placeholder="Valor Mensal Perdido" class="input-ui" />
+            </div>
+            <select id="churn_motivo" class="input-ui"><option value="Sem Motivo">Sem Motivo</option><option value="Preco">Preco</option><option value="Falta de Funcionalidade">Falta de Funcionalidade</option><option value="Falta de Integracao">Falta de Integracao</option><option value="Atendimento">Atendimento</option><option value="Outros">Outros</option></select>
+            <button id="btn-save-churn" class="btn-gold w-full">Salvar Churn</button>
+          </article>
+
+          <article class="panel border-t-2 border-mindlaw-gold p-6 space-y-4">
+            <h3 class="text-lg font-semibold">Feedback NPS (Pesquisa)</h3>
+            <input id="nps_cliente" list="clients-options" type="text" placeholder="Cliente" class="input-ui" />
+            <div class="grid grid-cols-2 gap-3">
+              <input id="nps_data" type="date" class="input-ui" />
+              <input id="nps_nota" type="number" min="0" max="10" placeholder="Nota (0-10)" class="input-ui" />
+            </div>
+            <textarea id="nps_comentario" rows="3" placeholder="Comentario qualitativo" class="input-ui"></textarea>
+            <button id="btn-save-nps" class="btn-gold w-full">Salvar NPS</button>
+          </article>
+        </div>
+      </section>
+
+      <section id="view-clientes" class="tab-view hidden space-y-6">
+        <h2 class="text-3xl font-extrabold tracking-tight">Clientes</h2>
+        <article class="panel border-t-2 border-mindlaw-gold p-6 space-y-4">
+          <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 class="text-lg font-semibold">Indicador de entradas</h3>
+              <p class="text-xs text-mindlaw-white/60">O periodo e o do header (Mes/Ano ou data inicio/fim), aplicado a <strong>data de referencia</strong> de cada cliente. Abaixo, o grafico e o total <strong>por status</strong> (a lista pode filtrar um status).</p>
+              <p id="client-dashboard-period" class="mt-2 text-sm text-mindlaw-gold/80"></p>
+            </div>
+            <button type="button" id="btn-export-clients" class="btn-gold shrink-0 !px-4 !py-2.5 text-xs font-bold uppercase tracking-wider">Exportar relatorio</button>
+          </div>
+          <div class="grid grid-cols-1 items-center gap-6 lg:grid-cols-2">
+            <div class="text-center">
+              <p class="text-xs text-mindlaw-white/50">Entradas no periodo (todos os status)</p>
+              <p id="kpi-client-entradas-total" class="mt-1 font-mono text-4xl font-extrabold text-mindlaw-gold">0</p>
+            </div>
+            <div class="h-64 w-full max-w-md justify-self-center lg:max-w-full">
+              <canvas id="chartClientesEntradas"></canvas>
+            </div>
+          </div>
+          <ul id="client-dashboard-legend" class="flex flex-wrap gap-2 text-xs text-mindlaw-white/80"></ul>
+        </article>
+        <article class="panel border-t-2 border-mindlaw-gold p-6 space-y-4">
+          <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+            <div>
+              <h3 class="text-lg font-semibold">Filtrar por status</h3>
+              <p class="text-xs text-mindlaw-white/60">Afeta a lista abaixo e o carregamento dos dados (mesmo periodo do header).</p>
+            </div>
+            <select id="filter-client-status" class="input-ui !max-w-md">
+              <option value="">Todos os status</option>
+              <option value="cliente">Cliente (ativo)</option>
+              <option value="pagamento_pendente">Cliente com pagamento pendente</option>
+              <option value="pagamento_recusado">Pagamento recusado</option>
+              <option value="cancelado">Cancelado</option>
+              <option value="novo_lead">Novo lead</option>
+            </select>
+          </div>
+        </article>
+        <article class="panel border-t-2 border-mindlaw-gold p-6 space-y-4">
+          <h3 class="text-lg font-semibold">Novo Cliente</h3>
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+            <input id="client_nome" type="text" placeholder="Nome" class="input-ui" />
+            <input id="client_telefone" type="text" placeholder="Telefone" class="input-ui" />
+            <input id="client_email" type="email" placeholder="E-mail" class="input-ui" />
+            <select id="client_status" class="input-ui">
+              <option value="cliente">Cliente (ativo)</option>
+              <option value="pagamento_pendente">Pagamento pendente</option>
+              <option value="pagamento_recusado">Pagamento recusado</option>
+              <option value="cancelado">Cancelado</option>
+              <option value="novo_lead">Novo lead</option>
+            </select>
+            <input id="client_plano" type="text" placeholder="Plano (Starter, Premium...)" class="input-ui" />
+            <input id="client_data_ref" type="date" class="input-ui" />
+          </div>
+          <button id="btn-save-client" class="btn-gold !px-5">Salvar Cliente</button>
+        </article>
+        <article class="panel border-t-2 border-mindlaw-gold p-6">
+          <h3 class="mb-4 text-lg font-semibold">Lista de Clientes</h3>
+          <div id="clients-list" class="grid grid-cols-1 gap-3 md:grid-cols-2"></div>
+        </article>
+      </section>
+
+      <section id="view-logs" class="tab-view hidden space-y-6">
+        <h2 class="text-3xl font-extrabold tracking-tight">Logs de Dados</h2>
+        <article class="panel border-t-2 border-mindlaw-gold overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full min-w-[760px] text-left text-sm">
+              <thead class="bg-mindlaw-gold/10 text-mindlaw-gold">
+                <tr>
+                  <th class="px-4 py-3">Tipo</th>
+                  <th class="px-4 py-3">Cliente</th>
+                  <th class="px-4 py-3">Data</th>
+                  <th class="px-4 py-3">Status</th>
+                  <th class="px-4 py-3">Detalhe</th>
+                </tr>
+              </thead>
+              <tbody id="logs-table" class="divide-y divide-white/5"></tbody>
+            </table>
+          </div>
+        </article>
+      </section>
+    </main>
+  </div>
+  <datalist id="clients-options"></datalist>
+  <script src="/script.js"></script>
+</body>
+</html>

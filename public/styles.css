@@ -1,0 +1,143 @@
+:root {
+  --mindlaw-gold: #c5a059;
+  --mindlaw-teal: #002228;
+  --mindlaw-dark: #001a1e;
+  --mindlaw-white: #ffffff;
+}
+
+body {
+  background: radial-gradient(circle at top right, rgba(197, 160, 89, 0.08), transparent 45%), var(--mindlaw-dark);
+  font-family: "Plus Jakarta Sans", sans-serif;
+  position: relative;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.02;
+  background-image: radial-gradient(circle at 20% 20%, #ffffff 0.8px, transparent 0.8px);
+  background-size: 3px 3px;
+}
+
+.dashboard-body .panel,
+.glass-card {
+  background: rgba(0, 34, 40, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  backdrop-filter: blur(12px);
+  border-radius: 1rem;
+  transition: transform 0.24s ease, opacity 0.24s ease, box-shadow 0.24s ease;
+  position: relative;
+  z-index: 1;
+}
+
+.kpi-card:hover,
+.kpi-card:focus-within {
+  box-shadow: 0 0 0 1px rgba(197, 160, 89, 0.25), 0 0 28px rgba(197, 160, 89, 0.18);
+}
+
+.sidebar {
+  transition: width 0.25s ease;
+}
+
+.sidebar.collapsed {
+  width: 88px;
+  overflow: hidden;
+}
+
+.sidebar-drawer {
+  transform: translateX(-105%);
+  transition: transform 0.48s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.sidebar-drawer.open {
+  transform: translateX(0);
+}
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 45;
+  opacity: 1;
+  transition: opacity 0.25s ease;
+}
+
+.tab-view {
+  animation: fadeIn 0.3s ease;
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+
+.input-ui {
+  width: 100%;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(197, 160, 89, 0.2);
+  background: rgba(0, 26, 30, 0.45);
+  padding: 0.7rem 0.8rem;
+  min-height: 48px;
+  color: #fff;
+  outline: none;
+}
+
+.input-ui:focus {
+  border-color: var(--mindlaw-gold);
+}
+
+.btn-gold {
+  border-radius: 0.75rem;
+  background: var(--mindlaw-gold);
+  color: var(--mindlaw-dark);
+  font-weight: 700;
+  padding: 0.7rem 1rem;
+}
+
+.reveal-card {
+  opacity: 0;
+  transform: translateY(14px);
+}
+
+.reveal-card.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.status-chip {
+  border-radius: 999px;
+  padding: 0.2rem 0.55rem;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.status-ganho { background: rgba(34, 197, 94, 0.18); color: #bbf7d0; }
+.status-perdido { background: rgba(239, 68, 68, 0.16); color: #fecaca; }
+.status-negociacao { background: rgba(197, 160, 89, 0.2); color: #f8e9c7; }
+
+.cli-chip {
+  display: inline-block;
+  margin-top: 0.35rem;
+  border-radius: 999px;
+  padding: 0.15rem 0.55rem;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.cli-st-cliente { background: rgba(34, 197, 94, 0.2); color: #bbf7d0; }
+.cli-st-pagamento_pendente { background: rgba(250, 204, 21, 0.2); color: #fef08a; }
+.cli-st-pagamento_recusado { background: rgba(249, 115, 22, 0.22); color: #fed7aa; }
+.cli-st-cancelado { background: rgba(239, 68, 68, 0.2); color: #fecaca; }
+.cli-st-novo_lead { background: rgba(96, 165, 250, 0.2); color: #bfdbfe; }
+
+@media (max-width: 768px) {
+  .input-ui {
+    min-height: 50px;
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}

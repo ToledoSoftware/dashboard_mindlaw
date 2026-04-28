@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MindLaw | Login</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['"Plus Jakarta Sans"', "sans-serif"] },
+          colors: {
+            mindlaw: {
+              teal: "#002228",
+              softTeal: "#00333A",
+              gold: "#C5A059",
+              white: "#FFFFFF"
+            }
+          }
+        }
+      }
+    };
+  </script>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="min-h-screen bg-mindlaw-teal font-sans text-mindlaw-white antialiased">
+  <main class="flex min-h-screen items-center justify-center p-6">
+    <section class="glass-card w-full max-w-md rounded-2xl p-8 shadow-2xl shadow-black/30">
+      <div class="mb-8 text-center">
+        <div class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-xl border border-mindlaw-gold/30 bg-mindlaw-gold/5 p-2">
+          <img src="/mindlaw_fundo_escuro.svg" alt="MindLaw" class="h-full w-full object-contain" />
+        </div>
+        <h1 class="text-3xl font-extrabold">MindLaw</h1>
+        <p class="mt-2 text-sm text-mindlaw-white/75">Acesso ao painel de inteligência</p>
+      </div>
+
+      <div id="errorBox" class="mb-4 hidden rounded-lg border border-red-200/30 bg-red-500/10 px-3 py-2 text-sm text-red-100"></div>
+
+      <form id="loginForm" class="space-y-4">
+        <div>
+          <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-mindlaw-white/80">Usuário</label>
+          <div class="relative">
+            <i data-lucide="user-round" class="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-mindlaw-gold"></i>
+            <input id="username" type="text" required class="w-full rounded-xl border border-mindlaw-gold/20 bg-mindlaw-teal/50 py-3 pl-10 pr-3 outline-none focus:border-mindlaw-gold" placeholder="Digite seu usuário" />
+          </div>
+        </div>
+        <div>
+          <label class="mb-2 block text-xs font-semibold uppercase tracking-[0.16em] text-mindlaw-white/80">Senha</label>
+          <div class="relative">
+            <i data-lucide="lock-keyhole" class="pointer-events-none absolute left-3 top-3.5 h-4 w-4 text-mindlaw-gold"></i>
+            <input id="password" type="password" required class="w-full rounded-xl border border-mindlaw-gold/20 bg-mindlaw-teal/50 py-3 pl-10 pr-3 outline-none focus:border-mindlaw-gold" placeholder="Digite sua senha" />
+          </div>
+        </div>
+        <button type="submit" class="flex w-full items-center justify-center gap-2 rounded-xl bg-mindlaw-gold px-4 py-3 font-bold uppercase tracking-[0.12em] text-mindlaw-teal transition hover:brightness-105">
+          <i data-lucide="log-in" class="h-4 w-4"></i>
+          Entrar
+        </button>
+      </form>
+    </section>
+  </main>
+
+  <script>
+    lucide.createIcons();
+
+    document.getElementById("loginForm").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const username = document.getElementById("username").value.trim();
+      const password = document.getElementById("password").value;
+      const errorBox = document.getElementById("errorBox");
+
+      try {
+        const response = await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Falha no login.");
+        if (data.token) {
+          localStorage.setItem("mindlaw_token", data.token);
+        }
+
+        window.location.href = "/";
+      } catch (error) {
+        console.error("[MindLaw] Falha no login", error);
+        errorBox.textContent = error.message;
+        errorBox.classList.remove("hidden");
+      }
+    });
+  </script>
+</body>
+</html>

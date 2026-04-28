@@ -1,0 +1,40 @@
+# --- SEGURANÇA (CRÍTICO) ---
+# Nunca suba suas chaves de acesso e senhas
+.env
+.env.local
+.env.*.local
+
+# --- NODE.js / FRONTEND ---
+node_modules/
+dist/
+build/
+.astro/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# --- PYTHON / AMBIENTE VIRTUAL ---
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+ENV/
+*.venv/
+
+# --- BANCO DE DADOS LOCAL (LEGADO) ---
+# Ignora o arquivo SQLite para não vazar dados dos clientes
+*.db
+*.sqlite3
+
+# --- SISTEMA OPERACIONAL ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- IDEs / EDITORES ---
+.vscode/
+.idea/
+*.swp
+*.swo

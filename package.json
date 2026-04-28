@@ -1,0 +1,30 @@
+{
+  "name": "mindlaw-webapp",
+  "version": "1.0.0",
+  "description": "MindLaw Web App com Node.js, Express, MongoDB e JWT",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon --watch server.js --watch routes --watch models --watch middleware --watch services server.js",
+    "migrate:data": "node migrate-data.js",
+    "import:clients": "node scripts/import-clients.js",
+    "import:atividade": "node scripts/import-clientes-atividade.js",
+    "data:lista": "node scripts/gerar-arquivo-lista-clientes.js"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.19.1",
+    "sqlite3": "^5.1.7",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
+  }
+}
