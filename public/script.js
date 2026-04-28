@@ -1,10 +1,14 @@
 const chartState = { loss: null, closure: null, nps: null, clientEntradas: null, clientResumo: null };
 let currentFilters = {};
 let currentClientList = [];
+let currentClientRawList = [];
 let editingClientId = null;
 let lastCreatedClientName = "";
 let rawLogsCache = [];
 let interactiveFilter = null;
+let clientsPage = 1;
+let clientsPageSize = 25;
+let clientsSearchTerm = "";
 
 const CLIENT_STATUS_LABELS = {
   cliente: "Cliente (ativo)",
@@ -219,6 +223,17 @@ function normalizeText(value) {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+}
+
+function includesSearch(client, term) {
+  if (!term) return true;
+  const base = normalizeText(term);
+  const nome = normalizeText(client?.nome);
+  const email = normalizeText(client?.email);
+  const tel = String(client?.telefone || "").replace(/\D/g, "");
+  const raw = String(term || "").replace(/\D/g, "");
+  const phoneMatch = raw ? tel.includes(raw) : false;
+  return nome.includes(base) || email.includes(base) || phoneMatch;
 }
 
 function renderComercialKpis(kpis) {
@@ -578,15 +593,41 @@ function renderClients(clients) {
   const container = document.getElementById("clients-list");
   if (!container) return;
   const list = Array.isArray(clients) ? clients : [];
-  currentClientList = list;
+  currentClientRawList = list;
+  const searched = list.filter((c) => includesSearch(c, clientsSearchTerm));
+  currentClientList = searched;
+  const totalResults = searched.length;
+  const pageSizeSel = document.getElementById("clients-page-size");
+  if (pageSizeSel) {
+    const selected = Number(pageSizeSel.value || clientsPageSize);
+    clientsPageSize = Number.isNaN(selected) ? 25 : selected;
+  }
+  const totalPages = Math.max(1, Math.ceil(totalResults / clientsPageSize));
+  if (clientsPage > totalPages) clientsPage = totalPages;
+  if (clientsPage < 1) clientsPage = 1;
+  const startIdx = (clientsPage - 1) * clientsPageSize;
+  const endIdx = startIdx + clientsPageSize;
+  const pageList = searched.slice(startIdx, endIdx);
+  const countEl = document.getElementById("clients-results-count");
+  if (countEl) {
+    const from = totalResults ? startIdx + 1 : 0;
+    const to = Math.min(endIdx, totalResults);
+    countEl.textContent = `${totalResults} resultado(s)${totalResults ? ` • exibindo ${from}-${to}` : ""}`;
+  }
+  const pageInfo = document.getElementById("clients-page-info");
+  if (pageInfo) pageInfo.textContent = `Página ${clientsPage} de ${totalPages}`;
+  const prevBtn = document.getElementById("clients-prev-page");
+  const nextBtn = document.getElementById("clients-next-page");
+  if (prevBtn) prevBtn.disabled = clientsPage <= 1;
+  if (nextBtn) nextBtn.disabled = clientsPage >= totalPages;
   const statusKey = (s) => String(s || "cliente").replace(/[^a-z0-9_]/gi, "_");
   const fmtData = (d) => {
     if (!d) return "—";
     const t = new Date(d);
     return Number.isNaN(t.getTime()) ? "—" : t.toLocaleDateString("pt-BR");
   };
-  container.innerHTML = list.length
-    ? list.map((c) => {
+  container.innerHTML = pageList.length
+    ? pageList.map((c) => {
       const st = c.statusContrato || "cliente";
       const chipClass = `cli-chip cli-st-${statusKey(st)}`;
       return `<article class="rounded-xl border border-white/10 bg-mindlaw-teal/40 p-3">
@@ -857,12 +898,23 @@ function restoreFilters() {
   if (sortBySel) sortBySel.value = parsed.sortBy || "cadastro";
   const sortDirSel = document.getElementById("filter-client-sort-dir");
   if (sortDirSel) sortDirSel.value = parsed.sortDir || "desc";
+  const searchInput = document.getElementById("filter-client-search");
+  if (searchInput) {
+    searchInput.value = parsed.clientSearch || "";
+    clientsSearchTerm = searchInput.value;
+  }
+  const pageSizeSel = document.getElementById("clients-page-size");
+  if (pageSizeSel) {
+    pageSizeSel.value = parsed.clientsPageSize || "25";
+    clientsPageSize = Number(pageSizeSel.value || 25);
+  }
   currentFilters = {
     ...currentFilters,
     clientStatus: parsed.clientStatus || "",
     clientSegment: parsed.clientSegment || "",
     sortBy: parsed.sortBy || "cadastro",
-    sortDir: parsed.sortDir || "desc"
+    sortDir: parsed.sortDir || "desc",
+    clientSearch: parsed.clientSearch || ""
   };
   syncSectionPeriodInputs();
 }
@@ -996,7 +1048,10 @@ function bindEvents() {
     }
   });
   const reloadClients = async () => {
+    clientsPage = 1;
     currentFilters = collectFilters();
+    currentFilters.clientSearch = clientsSearchTerm;
+    currentFilters.clientsPageSize = String(clientsPageSize);
     localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
     try {
       await carregarTudo();
@@ -1008,6 +1063,28 @@ function bindEvents() {
   document.getElementById("filter-client-segment")?.addEventListener("change", reloadClients);
   document.getElementById("filter-client-sort-by")?.addEventListener("change", reloadClients);
   document.getElementById("filter-client-sort-dir")?.addEventListener("change", reloadClients);
+  document.getElementById("filter-client-search")?.addEventListener("input", (event) => {
+    clientsSearchTerm = event.target.value || "";
+    clientsPage = 1;
+    currentFilters = { ...currentFilters, clientSearch: clientsSearchTerm };
+    localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+    renderClients(Array.isArray(currentClientRawList) ? currentClientRawList : []);
+  });
+  document.getElementById("clients-page-size")?.addEventListener("change", async (event) => {
+    clientsPageSize = Number(event.target.value || 25);
+    clientsPage = 1;
+    currentFilters = { ...currentFilters, clientsPageSize: String(clientsPageSize) };
+    localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+    renderClients(currentClientList);
+  });
+  document.getElementById("clients-prev-page")?.addEventListener("click", () => {
+    clientsPage -= 1;
+    renderClients(currentClientList);
+  });
+  document.getElementById("clients-next-page")?.addEventListener("click", () => {
+    clientsPage += 1;
+    renderClients(currentClientList);
+  });
   document.getElementById("clients-list")?.addEventListener("click", (event) => {
     const trigger = event.target.closest("[data-client-edit]");
     if (!trigger) return;

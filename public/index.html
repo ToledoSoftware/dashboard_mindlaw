@@ -230,10 +230,33 @@
               </select>
             </div>
           </div>
+          <input id="filter-client-search" type="text" placeholder="Buscar por nome, e-mail ou telefone" class="input-ui" />
         </article>
         <article class="panel border-t-2 border-mindlaw-gold p-6">
-          <h3 class="mb-4 text-lg font-semibold">Lista de Clientes</h3>
+          <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <h3 class="text-lg font-semibold">Lista de Clientes</h3>
+            <div class="flex flex-wrap items-center gap-2">
+              <p id="clients-results-count" class="text-sm text-mindlaw-white/75">0 resultados</p>
+              <label for="clients-page-size" class="text-xs text-mindlaw-white/60">por página</label>
+              <select id="clients-page-size" class="input-ui !min-h-10 !w-[96px] !py-2">
+                <option value="25">25</option>
+                <option value="50">50</option>
+                <option value="100">100</option>
+                <option value="150">150</option>
+                <option value="250">250</option>
+                <option value="500">500</option>
+                <option value="1000">1000</option>
+              </select>
+            </div>
+          </div>
           <div id="clients-list" class="grid grid-cols-1 gap-3 md:grid-cols-2"></div>
+          <div id="clients-pagination" class="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm text-mindlaw-white/80">
+            <span id="clients-page-info">Página 1 de 1</span>
+            <div class="flex items-center gap-2">
+              <button id="clients-prev-page" class="rounded-lg border border-white/20 px-3 py-1.5 hover:border-mindlaw-gold/60">Anterior</button>
+              <button id="clients-next-page" class="rounded-lg border border-white/20 px-3 py-1.5 hover:border-mindlaw-gold/60">Próxima</button>
+            </div>
+          </div>
         </article>
       </section>
 

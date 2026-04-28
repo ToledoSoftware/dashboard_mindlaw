@@ -183,7 +183,8 @@ async function getClientEntradaStats(query = {}) {
 function applyClientSort(query = {}) {
   const sortBy = String(query.sortBy || "nome").trim().toLowerCase();
   const sortDir = String(query.sortDir || "asc").trim().toLowerCase() === "desc" ? -1 : 1;
-  if (sortBy === "cadastro") return { createdAt: sortDir, nome: 1 };
+  // Em imports em lote, createdAt pode ficar muito parecido; desempata por _id.
+  if (sortBy === "cadastro") return { createdAt: sortDir, _id: sortDir };
   if (sortBy === "plano") return { plano: sortDir, nome: 1 };
   if (sortBy === "status") return { statusContrato: sortDir, nome: 1 };
   if (sortBy === "data_ref" || sortBy === "datareferencia") return { dataReferencia: sortDir, nome: 1 };
