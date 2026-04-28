@@ -2,8 +2,9 @@ const express = require("express");
 const XLSX = require("xlsx");
 const Sale = require("../models/Sale");
 const Support = require("../models/Support");
+const Client = require("../models/Client");
 const { getRangeFromQuery } = require("../lib/dateRange");
-const { ensureClientByName, listAllClientsSorted, getClientEntradaStats } = require("../services/clientSync");
+const { ensureClientByName, listAllClientsSorted, getClientEntradaStats, computeChaveUnica } = require("../services/clientSync");
 const authMiddleware = require("../middleware/authMiddleware");
 
 const STATUS_LABEL_PT = {
@@ -59,7 +60,9 @@ router.get("/clients/export", async (_req, res) => {
 
 router.get("/clients", async (_req, res) => {
   try {
-    const clients = await listAllClientsSorted(_req.query || {});
+    const forForms = String(_req.query.forForms || "") === "1";
+    const query = forForms ? {} : (_req.query || {});
+    const clients = await listAllClientsSorted(query);
     return res.json({ clients });
   } catch (error) {
     return res.status(500).json({ error: "Erro ao carregar clientes." });
@@ -81,6 +84,38 @@ router.post("/clients", async (req, res) => {
     return res.status(201).json({ status: "ok", data: client });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao salvar cliente." });
+  }
+});
+
+router.put("/clients/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+    const existing = await Client.findById(id);
+    if (!existing) return res.status(404).json({ error: "Cliente não encontrado." });
+    const payload = req.body || {};
+    const patch = {};
+    if (payload.nome !== undefined) {
+      const nome = String(payload.nome || "").trim();
+      if (!nome) return res.status(400).json({ error: "Nome é obrigatório." });
+      patch.nome = nome;
+      patch.normalizedName = nome.toLowerCase().trim().replace(/\s+/g, " ");
+    }
+    if (payload.telefone !== undefined) patch.telefone = String(payload.telefone || "").trim();
+    if (payload.email !== undefined) patch.email = String(payload.email || "").trim().toLowerCase();
+    if (payload.plano !== undefined) patch.plano = String(payload.plano || "").trim();
+    if (payload.statusContrato !== undefined) patch.statusContrato = payload.statusContrato;
+    if (payload.dataReferencia !== undefined) {
+      patch.dataReferencia = payload.dataReferencia ? new Date(payload.dataReferencia) : null;
+    }
+    const nextNome = patch.nome !== undefined ? patch.nome : existing.nome;
+    const nextEmail = patch.email !== undefined ? patch.email : existing.email;
+    const nextTel = patch.telefone !== undefined ? patch.telefone : existing.telefone;
+    patch.chaveUnica = computeChaveUnica(nextNome, nextEmail, nextTel);
+    const updated = await Client.findByIdAndUpdate(id, { $set: patch }, { new: true, runValidators: true });
+    return res.json({ status: "ok", data: updated });
+  } catch (error) {
+    return res.status(400).json({ error: "Falha ao atualizar cliente." });
   }
 });
 

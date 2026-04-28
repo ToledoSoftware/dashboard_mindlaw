@@ -57,10 +57,19 @@ body::before {
   transform: translateX(0);
 }
 
+.modal-ui {
+  backdrop-filter: blur(12px);
+}
+
+.modal-ui::backdrop {
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(8px);
+}
+
 .drawer-backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.45);
+  background: rgba(0, 0, 0, 0.6);
   z-index: 45;
   opacity: 1;
   transition: opacity 0.25s ease;
@@ -134,6 +143,30 @@ body::before {
 @media (max-width: 768px) {
   .input-ui {
     min-height: 50px;
+  }
+
+  .kpi-card {
+    width: 100%;
+  }
+
+  .sidebar-drawer {
+    width: min(85vw, 320px);
+  }
+
+  #view-resumo .grid,
+  #view-comercial .grid,
+  #view-suporte .grid,
+  #view-lancamentos .grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  #view-resumo h2,
+  #view-comercial h2,
+  #view-suporte h2,
+  #view-lancamentos h2,
+  #view-clientes h2,
+  #view-logs h2 {
+    text-align: center;
   }
 }
 

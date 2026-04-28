@@ -1,5 +1,8 @@
 const chartState = { loss: null, closure: null, nps: null, clientEntradas: null };
 let currentFilters = {};
+let currentClientList = [];
+let editingClientId = null;
+let lastCreatedClientName = "";
 
 const CLIENT_STATUS_LABELS = {
   cliente: "Cliente (ativo)",
@@ -48,7 +51,7 @@ async function request(url, options = {}) {
         localStorage.removeItem("mindlaw_token");
         window.location.href = "/login";
       }
-      throw new Error(data.error || "Erro na requisicao.");
+      throw new Error(data.error || "Erro na requisição.");
     }
     return data;
   } catch (error) {
@@ -61,7 +64,9 @@ const apiService = {
   commercialDashboard: (query = "") => request(`/api/commercial/dashboard${query}`),
   supportDashboard: (query = "") => request(`/api/support/dashboard${query}`),
   logs: (query = "") => request(`/api/logs${query}`),
+  clients: (query = "") => request(`/api/clients${query}`),
   createClient: (payload) => request("/api/clients", { method: "POST", body: JSON.stringify(payload) }),
+  updateClient: (id, payload) => request(`/api/clients/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
   createSale: (payload) => request("/api/sales", { method: "POST", body: JSON.stringify(payload) }),
   createChurn: (payload) => request("/api/support/churn", { method: "POST", body: JSON.stringify(payload) }),
   createNps: (payload) => request("/api/support/nps", { method: "POST", body: JSON.stringify(payload) }),
@@ -97,6 +102,7 @@ function switchTab(tabId) {
   }
   closeDrawer();
   localStorage.setItem("mindlaw_active_tab", tabId);
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 function openDrawer() {
@@ -111,6 +117,88 @@ function closeDrawer() {
 
 function toggleFiltersPanel() {
   document.getElementById("filters-panel")?.classList.toggle("hidden");
+}
+
+function renderSectionPeriodFilters() {
+  const sections = ["resumo", "comercial", "suporte", "lancamentos", "clientes", "logs"];
+  const monthOpts = `
+    <option value="1">Jan</option><option value="2">Fev</option><option value="3">Mar</option>
+    <option value="4">Abr</option><option value="5">Mai</option><option value="6">Jun</option>
+    <option value="7">Jul</option><option value="8">Ago</option><option value="9">Set</option>
+    <option value="10">Out</option><option value="11">Nov</option><option value="12">Dez</option>
+  `;
+  const nowYear = new Date().getFullYear();
+  const yearOpts = Array.from({ length: 9 }, (_, i) => nowYear - 4 + i)
+    .map((y) => `<option value="${y}">${y}</option>`)
+    .join("");
+  sections.forEach((sid) => {
+    const section = document.getElementById(`view-${sid}`);
+    if (!section) return;
+    if (section.querySelector(`[data-section-period="${sid}"]`)) return;
+    const holder = document.createElement("article");
+    holder.className = "panel border-t-2 border-mindlaw-gold p-4";
+    holder.setAttribute("data-section-period", sid);
+    holder.innerHTML = `
+      <div class="flex flex-wrap items-center gap-2">
+        <span class="text-xs uppercase tracking-[0.12em] text-mindlaw-white/65">Período</span>
+        <div class="flex items-center gap-1 rounded-lg border border-white/20 p-1">
+          <span class="px-2 text-xs text-mindlaw-white/60">De</span>
+          <select id="period-from-month-${sid}" data-period-input="${sid}" class="input-ui !min-h-9 !w-[88px] !py-1">${monthOpts}</select>
+          <select id="period-from-year-${sid}" data-period-input="${sid}" class="input-ui !min-h-9 !w-[92px] !py-1">${yearOpts}</select>
+        </div>
+        <div class="flex items-center gap-1 rounded-lg border border-white/20 p-1">
+          <span class="px-2 text-xs text-mindlaw-white/60">Até</span>
+          <select id="period-to-month-${sid}" data-period-input="${sid}" class="input-ui !min-h-9 !w-[88px] !py-1">${monthOpts}</select>
+          <select id="period-to-year-${sid}" data-period-input="${sid}" class="input-ui !min-h-9 !w-[92px] !py-1">${yearOpts}</select>
+        </div>
+        <button data-extend-period="${sid}" class="rounded-lg border border-white/20 px-3 py-2 text-xs hover:border-mindlaw-gold/60">+ mês</button>
+      </div>
+    `;
+    const title = section.querySelector("h2");
+    if (title && title.parentNode) {
+      title.insertAdjacentElement("afterend", holder);
+    } else {
+      section.prepend(holder);
+    }
+  });
+}
+
+function syncSectionPeriodInputs() {
+  const sections = ["resumo", "comercial", "suporte", "lancamentos", "clientes", "logs"];
+  const fromStart = currentFilters.startDate ? new Date(`${currentFilters.startDate}T00:00:00`) : null;
+  const fromEnd = currentFilters.endDate ? new Date(`${currentFilters.endDate}T00:00:00`) : null;
+  const startMonth = !fromStart || Number.isNaN(fromStart.getTime()) ? Number(currentFilters.month || new Date().getMonth() + 1) : fromStart.getMonth() + 1;
+  const startYear = !fromStart || Number.isNaN(fromStart.getTime()) ? Number(currentFilters.year || new Date().getFullYear()) : fromStart.getFullYear();
+  const endMonth = !fromEnd || Number.isNaN(fromEnd.getTime()) ? startMonth : fromEnd.getMonth() + 1;
+  const endYear = !fromEnd || Number.isNaN(fromEnd.getTime()) ? startYear : fromEnd.getFullYear();
+  sections.forEach((sid) => {
+    const fM = document.getElementById(`period-from-month-${sid}`);
+    const fY = document.getElementById(`period-from-year-${sid}`);
+    const tM = document.getElementById(`period-to-month-${sid}`);
+    const tY = document.getElementById(`period-to-year-${sid}`);
+    if (fM) fM.value = String(startMonth);
+    if (fY) fY.value = String(startYear);
+    if (tM) tM.value = String(endMonth);
+    if (tY) tY.value = String(endYear);
+  });
+}
+
+function collectPeriodFiltersFromSection(sectionId) {
+  const startMonth = Number(document.getElementById(`period-from-month-${sectionId}`)?.value || 0);
+  const startYear = Number(document.getElementById(`period-from-year-${sectionId}`)?.value || 0);
+  const endMonth = Number(document.getElementById(`period-to-month-${sectionId}`)?.value || 0);
+  const endYear = Number(document.getElementById(`period-to-year-${sectionId}`)?.value || 0);
+  const start = new Date(startYear, startMonth - 1, 1);
+  const end = new Date(endYear, endMonth, 0, 23, 59, 59, 999);
+  const startDate = Number.isNaN(start.getTime()) ? "" : start.toISOString().slice(0, 10);
+  const endDate = Number.isNaN(end.getTime()) ? "" : end.toISOString().slice(0, 10);
+  const isSingleMonth = startMonth === endMonth && startYear === endYear;
+  return {
+    month: isSingleMonth ? String(startMonth) : "",
+    year: isSingleMonth ? String(startYear) : "",
+    startDate,
+    endDate
+  };
 }
 
 async function logout() {
@@ -131,9 +219,9 @@ function renderComercialKpis(kpis) {
 
 function renderSupportKpis(kpis) {
   document.getElementById("kpi-churn").textContent = `${(kpis.churnRate || 0).toFixed(1)}%`;
-  document.getElementById("kpi-nps").textContent = `${(kpis.npsScore || 0).toFixed(1)}%`;
+  document.getElementById("kpi-nps").textContent = `${(kpis.npsScore || 0).toFixed(1)}`;
   document.getElementById("kpi-resumo-churn").textContent = `${(kpis.churnRate || 0).toFixed(1)}%`;
-  document.getElementById("kpi-resumo-nps").textContent = `${(kpis.npsScore || 0).toFixed(1)}%`;
+  document.getElementById("kpi-resumo-nps").textContent = `${(kpis.npsScore || 0).toFixed(1)}`;
 }
 
 function renderComercialCharts(commercial) {
@@ -141,14 +229,17 @@ function renderComercialCharts(commercial) {
   const reasons = commercial.lossReasons || {};
 
   const funnelCtx = document.getElementById("chartFunnel").getContext("2d");
+  const gainGradient = funnelCtx.createLinearGradient(0, 0, 0, 260);
+  gainGradient.addColorStop(0, "#C5A059");
+  gainGradient.addColorStop(1, "#92733C");
   if (chartState.closure) chartState.closure.destroy();
   chartState.closure = new Chart(funnelCtx, {
     type: "doughnut",
     data: {
-      labels: ["Ganho", "Perdido", "Em Negociacao"],
+      labels: ["Ganho", "Perdido", "Em Negociação"],
       datasets: [{
         data: [funnel.gains || 0, funnel.losses || 0, funnel.negotiating || 0],
-        backgroundColor: ["#C5A059", "#FFFFFF", "#4B5563"],
+        backgroundColor: [gainGradient, "#E7D4AB", "#5B4A27"],
         borderWidth: 0
       }]
     },
@@ -167,7 +258,7 @@ function renderComercialCharts(commercial) {
       labels: reasonLabels.length ? reasonLabels : ["Sem dados"],
       datasets: [{
         data: reasonValues.length ? reasonValues : [1],
-        backgroundColor: ["#C5A059", "#FFFFFF", "#4B5563", "#92733C"],
+        backgroundColor: ["#C5A059", "#E7D4AB", "#92733C", "#6E562B"],
         borderWidth: useBar ? 1 : 0,
         borderRadius: useBar ? 8 : 0
       }]
@@ -264,6 +355,13 @@ function renderSupportCharts(supportDashboard) {
     .join("");
 
   const npsDist = supportDashboard.npsDistribution || { Promotor: 0, Neutro: 0, Detrator: 0 };
+  const totalNps = (npsDist.Promotor || 0) + (npsDist.Neutro || 0) + (npsDist.Detrator || 0);
+  const npsScore = totalNps ? (((npsDist.Promotor || 0) - (npsDist.Detrator || 0)) / totalNps) * 100 : 0;
+  const npsScoreText = `${npsScore.toFixed(1)}`;
+  const kpiNps = document.getElementById("kpi-nps");
+  const kpiNpsResumo = document.getElementById("kpi-resumo-nps");
+  if (kpiNps) kpiNps.textContent = npsScoreText;
+  if (kpiNpsResumo) kpiNpsResumo.textContent = npsScoreText;
   const npsCtx = document.getElementById("chartNps").getContext("2d");
   if (chartState.nps) chartState.nps.destroy();
   const promoterGradient = npsCtx.createLinearGradient(0, 0, 0, 260);
@@ -275,7 +373,7 @@ function renderSupportCharts(supportDashboard) {
       labels: ["Promotor", "Neutro", "Detrator"],
       datasets: [{
         data: [npsDist.Promotor || 0, npsDist.Neutro || 0, npsDist.Detrator || 0],
-        backgroundColor: [promoterGradient, "#FFFFFF", "#4B5563"],
+        backgroundColor: [promoterGradient, "#E7D4AB", "#6E562B"],
         borderWidth: 0
       }]
     },
@@ -303,21 +401,20 @@ function renderLogsTable(logs) {
   const body = document.getElementById("logs-table");
   body.innerHTML = logs.length
     ? logs.map((item) => `<tr>
-      <td class="px-5 py-4">${item.tipo}</td>
-      <td class="px-5 py-4">${item.cliente || "-"}</td>
-      <td class="px-5 py-4">${item.data ? new Date(item.data).toLocaleDateString("pt-BR") : "-"}</td>
-      <td class="px-5 py-4"><span class="status-chip ${statusClass(item.status)}">${item.status || "-"}</span></td>
-      <td class="px-5 py-4">${item.detalhe || "-"}</td>
+      <td class="px-6 py-4">${item.tipo}</td>
+      <td class="px-6 py-4">${item.cliente || "-"}</td>
+      <td class="px-6 py-4">${item.data ? new Date(item.data).toLocaleDateString("pt-BR") : "-"}</td>
+      <td class="px-6 py-4"><span class="status-chip ${statusClass(item.status)}">${item.status || "-"}</span></td>
+      <td class="px-6 py-4">${item.detalhe || "-"}</td>
     </tr>`).join("")
-    : `<tr><td colspan="5" class="px-5 py-6 text-center text-mindlaw-white/70">Sem registros.</td></tr>`;
+    : `<tr><td colspan="5" class="px-6 py-6 text-center text-mindlaw-white/70">Sem registros.</td></tr>`;
 }
 
 function renderClients(clients) {
   const container = document.getElementById("clients-list");
-  const datalist = document.getElementById("clients-options");
-  if (!container || !datalist) return;
+  if (!container) return;
   const list = Array.isArray(clients) ? clients : [];
-  datalist.innerHTML = list.map((c) => `<option value="${escapeHtml(c.nome)}"></option>`).join("");
+  currentClientList = list;
   const statusKey = (s) => String(s || "cliente").replace(/[^a-z0-9_]/gi, "_");
   const fmtData = (d) => {
     if (!d) return "—";
@@ -333,9 +430,63 @@ function renderClients(clients) {
       <span class="${chipClass}">${escapeHtml(CLIENT_STATUS_LABELS[st] || st)}</span>
       <p class="mt-1 text-xs text-mindlaw-white/70">${escapeHtml(c.plano || "—")} · ref. ${fmtData(c.dataReferencia)}</p>
       <p class="text-xs text-mindlaw-white/70">${escapeHtml(c.telefone || "Sem telefone")} • ${escapeHtml(c.email || "Sem e-mail")}</p>
+      <div class="mt-2">
+        <button class="rounded-lg border border-white/15 px-2 py-1 text-xs hover:border-mindlaw-gold/50" data-client-edit="${escapeHtml(c._id || "")}">Editar</button>
+      </div>
     </article>`;
     }).join("")
     : `<p class="text-sm text-mindlaw-white/70">Nenhum cliente neste filtro. Confira o status, reinicie o servidor (import automático se a coleção estiver vazia) ou rode <code class="text-mindlaw-gold/90">npm run import:atividade</code>. Para reimportar: defina <code class="text-mindlaw-gold/90">FORCE_IMPORT_LISTA=1</code> no .env e reinicie.</p>`;
+}
+
+async function refreshClientOptionsForForms() {
+  const datalist = document.getElementById("clients-options");
+  if (!datalist) return;
+  const response = await apiService.clients("?forForms=1");
+  const list = Array.isArray(response.clients) ? response.clients : [];
+  datalist.innerHTML = list
+    .filter((c) => c && c.nome)
+    .map((c) => `<option value="${escapeHtml(c.nome)}"></option>`)
+    .join("");
+}
+
+function openClientEditModal(clientId) {
+  const modal = document.getElementById("client-edit-modal");
+  if (!modal) return;
+  const target = currentClientList.find((c) => String(c._id) === String(clientId));
+  if (!target) return;
+  editingClientId = String(target._id);
+  document.getElementById("edit_client_nome").value = target.nome || "";
+  document.getElementById("edit_client_telefone").value = target.telefone || "";
+  document.getElementById("edit_client_email").value = target.email || "";
+  document.getElementById("edit_client_status").value = target.statusContrato || "cliente";
+  document.getElementById("edit_client_plano").value = target.plano || "";
+  if (target.dataReferencia) {
+    const d = new Date(target.dataReferencia);
+    document.getElementById("edit_client_data_ref").value = Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
+  } else {
+    document.getElementById("edit_client_data_ref").value = "";
+  }
+  modal.showModal();
+}
+
+async function salvarEdicaoCliente() {
+  try {
+    if (!editingClientId) throw new Error("Cliente inválido.");
+    const payload = {
+      nome: document.getElementById("edit_client_nome").value.trim(),
+      telefone: document.getElementById("edit_client_telefone").value.trim(),
+      email: document.getElementById("edit_client_email").value.trim(),
+      statusContrato: document.getElementById("edit_client_status").value,
+      plano: document.getElementById("edit_client_plano").value.trim(),
+      dataReferencia: document.getElementById("edit_client_data_ref").value || null
+    };
+    await apiService.updateClient(editingClientId, payload);
+    document.getElementById("client-edit-modal")?.close();
+    toast("Cliente atualizado.");
+    await carregarTudo();
+  } catch (error) {
+    toast(error.message || "Erro ao atualizar cliente.");
+  }
 }
 
 async function salvarSale() {
@@ -404,7 +555,7 @@ async function baixarRelatorioClientes() {
     });
     if (!response.ok) {
       const data = await response.json().catch(() => ({}));
-      throw new Error(data.error || "Falha ao exportar relatorio de clientes.");
+      throw new Error(data.error || "Falha ao exportar relatório de clientes.");
     }
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
@@ -449,7 +600,8 @@ async function carregarTudo() {
   const [commercial, support, logs] = await Promise.all([
     apiService.commercialDashboard(query),
     apiService.supportDashboard(query),
-    apiService.logs(query)
+    apiService.logs(query),
+    refreshClientOptionsForForms()
   ]);
   renderComercialKpis(commercial.kpis || {});
   renderSupportKpis(support.kpis || {});
@@ -458,18 +610,25 @@ async function carregarTudo() {
   renderLogsTable(logs.logs || []);
 
   // Lista de clientes vem do dashboard de suporte (mesma auth que já funciona),
-  // evitando depender só de GET /api/clients em ambientes com roteamento estranho.
+  // e recebe os filtros dedicados da aba de clientes.
   renderClientEntradaPanel(support.clientEntradaStats || {});
-  renderClients(Array.isArray(support.clients) ? support.clients : []);
+  const clientsResponse = await apiService.clients(buildFilterQuery(currentFilters));
+  renderClients(Array.isArray(clientsResponse.clients) ? clientsResponse.clients : []);
+  syncSectionPeriodInputs();
 }
 
 function collectFilters() {
+  const activeSection = document.querySelector(".tab-view:not(.hidden)")?.id?.replace("view-", "") || "resumo";
+  const period = collectPeriodFiltersFromSection(activeSection);
   return {
-    month: document.getElementById("filter-month")?.value || "",
-    year: document.getElementById("filter-year")?.value || "",
-    startDate: document.getElementById("filter-start")?.value || "",
-    endDate: document.getElementById("filter-end")?.value || "",
-    clientStatus: document.getElementById("filter-client-status")?.value || ""
+    month: period.month,
+    year: period.year,
+    startDate: period.startDate,
+    endDate: period.endDate,
+    clientStatus: document.getElementById("filter-client-status")?.value || "",
+    clientSegment: document.getElementById("filter-client-segment")?.value || "",
+    sortBy: document.getElementById("filter-client-sort-by")?.value || "cadastro",
+    sortDir: document.getElementById("filter-client-sort-dir")?.value || "desc"
   };
 }
 
@@ -480,6 +639,9 @@ function buildFilterQuery(filters) {
   if (filters.startDate) params.set("startDate", filters.startDate);
   if (filters.endDate) params.set("endDate", filters.endDate);
   if (filters.clientStatus) params.set("clientStatus", filters.clientStatus);
+  if (filters.clientSegment) params.set("clientSegment", filters.clientSegment);
+  if (filters.sortBy) params.set("sortBy", filters.sortBy);
+  if (filters.sortDir) params.set("sortDir", filters.sortDir);
   const query = params.toString();
   return query ? `?${query}` : "";
 }
@@ -506,33 +668,50 @@ function restoreFilters() {
   } catch (_error) {
     parsed = {};
   }
-  document.getElementById("filter-month").value = parsed.month || defaultMonth;
-  document.getElementById("filter-year").value = parsed.year || defaultYear;
-  document.getElementById("filter-start").value = parsed.startDate || "";
-  document.getElementById("filter-end").value = parsed.endDate || "";
+  currentFilters.month = parsed.month || defaultMonth;
+  currentFilters.year = parsed.year || defaultYear;
+  currentFilters.startDate = parsed.startDate || "";
+  currentFilters.endDate = parsed.endDate || "";
   const stSel = document.getElementById("filter-client-status");
   if (stSel) stSel.value = parsed.clientStatus || "";
-  currentFilters = collectFilters();
+  const segmentSel = document.getElementById("filter-client-segment");
+  if (segmentSel) segmentSel.value = parsed.clientSegment || "";
+  const sortBySel = document.getElementById("filter-client-sort-by");
+  if (sortBySel) sortBySel.value = parsed.sortBy || "cadastro";
+  const sortDirSel = document.getElementById("filter-client-sort-dir");
+  if (sortDirSel) sortDirSel.value = parsed.sortDir || "desc";
+  currentFilters = {
+    ...currentFilters,
+    clientStatus: parsed.clientStatus || "",
+    clientSegment: parsed.clientSegment || "",
+    sortBy: parsed.sortBy || "cadastro",
+    sortDir: parsed.sortDir || "desc"
+  };
+  syncSectionPeriodInputs();
 }
 
 async function salvarCliente() {
   try {
+    const modal = document.getElementById("new-client-modal");
     const payload = {
-      nome: document.getElementById("client_nome").value.trim(),
-      telefone: document.getElementById("client_telefone").value.trim(),
-      email: document.getElementById("client_email").value.trim(),
-      statusContrato: document.getElementById("client_status")?.value || "cliente",
-      plano: document.getElementById("client_plano")?.value.trim() || "",
-      dataReferencia: document.getElementById("client_data_ref")?.value || null
+      nome: document.getElementById("new_client_nome").value.trim(),
+      telefone: document.getElementById("new_client_telefone").value.trim(),
+      email: document.getElementById("new_client_email").value.trim(),
+      statusContrato: document.getElementById("new_client_status")?.value || "cliente",
+      plano: document.getElementById("new_client_plano")?.value.trim() || "",
+      dataReferencia: document.getElementById("new_client_data_ref")?.value || null
     };
     if (!payload.nome) throw new Error("Nome é obrigatório.");
     await apiService.createClient(payload);
-    document.getElementById("client_nome").value = "";
-    document.getElementById("client_telefone").value = "";
-    document.getElementById("client_email").value = "";
-    if (document.getElementById("client_plano")) document.getElementById("client_plano").value = "";
+    lastCreatedClientName = payload.nome;
+    document.getElementById("new_client_nome").value = "";
+    document.getElementById("new_client_telefone").value = "";
+    document.getElementById("new_client_email").value = "";
+    if (document.getElementById("new_client_plano")) document.getElementById("new_client_plano").value = "";
+    if (modal) modal.close();
     toast("Cliente salvo.");
     await carregarTudo();
+    document.getElementById("post-client-modal")?.showModal();
   } catch (error) {
     toast(error.message || "Erro ao salvar cliente.");
   }
@@ -542,8 +721,6 @@ function bindEvents() {
   document.getElementById("btn-menu-toggle")?.addEventListener("click", openDrawer);
   document.getElementById("btn-menu-close")?.addEventListener("click", closeDrawer);
   document.getElementById("drawer-backdrop")?.addEventListener("click", closeDrawer);
-  document.getElementById("btn-toggle-filters")?.addEventListener("click", toggleFiltersPanel);
-  document.getElementById("btn-apply-filters")?.addEventListener("click", applyFilters);
   document.getElementById("nav-resumo")?.addEventListener("click", () => switchTab("resumo"));
   document.getElementById("nav-comercial")?.addEventListener("click", () => switchTab("comercial"));
   document.getElementById("nav-suporte")?.addEventListener("click", () => switchTab("suporte"));
@@ -556,8 +733,73 @@ function bindEvents() {
   document.getElementById("btn-export")?.addEventListener("click", baixarPlanilha);
   document.getElementById("btn-export-clients")?.addEventListener("click", baixarRelatorioClientes);
   document.getElementById("btn-logout")?.addEventListener("click", logout);
-  document.getElementById("btn-save-client")?.addEventListener("click", salvarCliente);
-  document.getElementById("filter-client-status")?.addEventListener("change", async () => {
+  document.getElementById("btn-open-new-client-modal")?.addEventListener("click", () => {
+    document.getElementById("new-client-modal")?.showModal();
+  });
+  document.getElementById("btn-new-client-close")?.addEventListener("click", () => {
+    document.getElementById("new-client-modal")?.close();
+  });
+  document.getElementById("btn-save-new-client")?.addEventListener("click", salvarCliente);
+  document.getElementById("btn-post-client-close")?.addEventListener("click", () => {
+    document.getElementById("post-client-modal")?.close();
+  });
+  document.getElementById("btn-post-client-later")?.addEventListener("click", () => {
+    document.getElementById("post-client-modal")?.close();
+  });
+  document.getElementById("btn-post-client-open-launch")?.addEventListener("click", () => {
+    document.getElementById("post-client-modal")?.close();
+    switchTab("lancamentos");
+    const saleCliente = document.getElementById("sale_cliente");
+    if (saleCliente && lastCreatedClientName) {
+      saleCliente.value = lastCreatedClientName;
+      saleCliente.focus();
+    }
+  });
+
+  const applyPeriodFromSection = async (sid) => {
+    const period = collectPeriodFiltersFromSection(sid);
+    currentFilters = {
+      ...currentFilters,
+      ...period,
+      clientStatus: document.getElementById("filter-client-status")?.value || currentFilters.clientStatus || "",
+      clientSegment: document.getElementById("filter-client-segment")?.value || currentFilters.clientSegment || "",
+      sortBy: document.getElementById("filter-client-sort-by")?.value || currentFilters.sortBy || "cadastro",
+      sortDir: document.getElementById("filter-client-sort-dir")?.value || currentFilters.sortDir || "desc"
+    };
+    localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+    await carregarTudo();
+  };
+
+  document.addEventListener("click", async (event) => {
+    const extend = event.target.closest("[data-extend-period]");
+    if (!extend) return;
+    const sid = extend.getAttribute("data-extend-period");
+    const tM = document.getElementById(`period-to-month-${sid}`);
+    const tY = document.getElementById(`period-to-year-${sid}`);
+    const baseM = Number(tM?.value || currentFilters.month || new Date().getMonth() + 1);
+    const baseY = Number(tY?.value || currentFilters.year || new Date().getFullYear());
+    const d = new Date(baseY, baseM, 1);
+    if (tM) tM.value = String(d.getMonth() + 1);
+    if (tY) tY.value = String(d.getFullYear());
+    try {
+      await applyPeriodFromSection(sid);
+      toast("Período atualizado.");
+    } catch (error) {
+      toast(error.message || "Erro ao atualizar período.");
+    }
+  });
+  document.addEventListener("change", async (event) => {
+    const input = event.target.closest("[data-period-input]");
+    if (!input) return;
+    const sid = input.getAttribute("data-period-input");
+    try {
+      await applyPeriodFromSection(sid);
+      toast("Período atualizado.");
+    } catch (error) {
+      toast(error.message || "Erro ao atualizar período.");
+    }
+  });
+  const reloadClients = async () => {
     currentFilters = collectFilters();
     localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
     try {
@@ -565,6 +807,19 @@ function bindEvents() {
     } catch (error) {
       toast(error.message || "Erro ao filtrar clientes.");
     }
+  };
+  document.getElementById("filter-client-status")?.addEventListener("change", reloadClients);
+  document.getElementById("filter-client-segment")?.addEventListener("change", reloadClients);
+  document.getElementById("filter-client-sort-by")?.addEventListener("change", reloadClients);
+  document.getElementById("filter-client-sort-dir")?.addEventListener("change", reloadClients);
+  document.getElementById("clients-list")?.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-client-edit]");
+    if (!trigger) return;
+    openClientEditModal(trigger.getAttribute("data-client-edit"));
+  });
+  document.getElementById("btn-client-edit-save")?.addEventListener("click", salvarEdicaoCliente);
+  document.getElementById("btn-client-edit-close")?.addEventListener("click", () => {
+    document.getElementById("client-edit-modal")?.close();
   });
 }
 
@@ -582,6 +837,15 @@ function bindRevealObserver() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  if (window.Chart) {
+    Chart.defaults.color = "#FFFFFF";
+    Chart.defaults.borderColor = "rgba(255,255,255,0.14)";
+    Chart.defaults.plugins.legend.labels.color = "#FFFFFF";
+  }
+  if (window.lucide && typeof window.lucide.createIcons === "function") {
+    window.lucide.createIcons();
+  }
+  renderSectionPeriodFilters();
   document.querySelectorAll('input[type="date"]').forEach((el) => { el.valueAsDate = new Date(); });
   bindEvents();
   bindRevealObserver();

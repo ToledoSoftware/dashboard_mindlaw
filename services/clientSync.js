@@ -180,6 +180,26 @@ async function getClientEntradaStats(query = {}) {
   return { byStatus, total, range: range ? { start: range.start.toISOString(), end: range.end.toISOString() } : null };
 }
 
+function applyClientSort(query = {}) {
+  const sortBy = String(query.sortBy || "nome").trim().toLowerCase();
+  const sortDir = String(query.sortDir || "asc").trim().toLowerCase() === "desc" ? -1 : 1;
+  if (sortBy === "cadastro") return { createdAt: sortDir, nome: 1 };
+  if (sortBy === "plano") return { plano: sortDir, nome: 1 };
+  if (sortBy === "status") return { statusContrato: sortDir, nome: 1 };
+  if (sortBy === "data_ref" || sortBy === "datareferencia") return { dataReferencia: sortDir, nome: 1 };
+  return { nome: sortDir };
+}
+
+async function getNegotiatingLeadNames() {
+  const rows = await Sale.find({ status: "Em Negociacao" }).select("cliente").lean();
+  const set = new Set();
+  rows.forEach((row) => {
+    const key = normalizeKey(row?.cliente);
+    if (key) set.add(key);
+  });
+  return set;
+}
+
 async function listAllClientsSorted(query = {}) {
   try {
     await migrateLegacyClientsIfNeeded();
@@ -194,11 +214,23 @@ async function listAllClientsSorted(query = {}) {
   const filter = {};
   const st = String(query.clientStatus || query.statusContrato || "").trim();
   if (st && STATUS_CONTRATO.includes(st)) filter.statusContrato = st;
+  const segment = String(query.clientSegment || "").trim();
+  if (!filter.statusContrato && segment === "clientes") {
+    filter.statusContrato = { $ne: "novo_lead" };
+  }
+  if (!filter.statusContrato && segment === "leads") {
+    filter.statusContrato = "novo_lead";
+  }
   const range = getRangeFromQuery(query);
   if (range) {
     filter.dataReferencia = { $gte: range.start, $lte: range.end };
   }
-  return ClientModel.find(filter).sort({ nome: 1 }).lean();
+  let list = await ClientModel.find(filter).sort(applyClientSort(query)).lean();
+  if (segment === "leads_comercial") {
+    const names = await getNegotiatingLeadNames();
+    list = list.filter((item) => names.has(normalizeKey(item.nome)));
+  }
+  return list;
 }
 
 module.exports = {
@@ -209,5 +241,6 @@ module.exports = {
   importListaAtividadeIfNeeded,
   getClientEntradaStats,
   listAllClientsSorted,
+  getNegotiatingLeadNames,
   STATUS_CONTRATO
 };
