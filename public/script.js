@@ -138,22 +138,22 @@ function renderSectionPeriodFilters() {
     if (!section) return;
     if (section.querySelector(`[data-section-period="${sid}"]`)) return;
     const holder = document.createElement("article");
-    holder.className = "panel border-t-2 border-mindlaw-gold p-4";
+    holder.className = "panel border-t-2 border-mindlaw-gold p-5";
     holder.setAttribute("data-section-period", sid);
     holder.innerHTML = `
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="flex flex-wrap items-center gap-3">
         <span class="text-xs uppercase tracking-[0.12em] text-mindlaw-white/65">Período</span>
-        <div class="flex items-center gap-1 rounded-lg border border-white/20 p-1">
+        <div class="flex items-center gap-2 rounded-lg border border-white/20 p-2">
           <span class="px-2 text-xs text-mindlaw-white/60">De</span>
-          <select id="period-from-month-${sid}" data-period-input="${sid}" class="input-ui !min-h-9 !w-[88px] !py-1">${monthOpts}</select>
-          <select id="period-from-year-${sid}" data-period-input="${sid}" class="input-ui !min-h-9 !w-[92px] !py-1">${yearOpts}</select>
+          <select id="period-from-month-${sid}" data-period-input="${sid}" class="input-ui !min-h-10 !w-[94px] !py-2">${monthOpts}</select>
+          <select id="period-from-year-${sid}" data-period-input="${sid}" class="input-ui !min-h-10 !w-[100px] !py-2">${yearOpts}</select>
         </div>
-        <div class="flex items-center gap-1 rounded-lg border border-white/20 p-1">
+        <div class="flex items-center gap-2 rounded-lg border border-white/20 p-2">
           <span class="px-2 text-xs text-mindlaw-white/60">Até</span>
-          <select id="period-to-month-${sid}" data-period-input="${sid}" class="input-ui !min-h-9 !w-[88px] !py-1">${monthOpts}</select>
-          <select id="period-to-year-${sid}" data-period-input="${sid}" class="input-ui !min-h-9 !w-[92px] !py-1">${yearOpts}</select>
+          <select id="period-to-month-${sid}" data-period-input="${sid}" class="input-ui !min-h-10 !w-[94px] !py-2">${monthOpts}</select>
+          <select id="period-to-year-${sid}" data-period-input="${sid}" class="input-ui !min-h-10 !w-[100px] !py-2">${yearOpts}</select>
         </div>
-        <button data-extend-period="${sid}" class="rounded-lg border border-white/20 px-3 py-2 text-xs hover:border-mindlaw-gold/60">+ mês</button>
+        <button data-extend-period="${sid}" class="rounded-lg border border-white/20 px-4 py-2.5 text-xs hover:border-mindlaw-gold/60">+ mês</button>
       </div>
     `;
     const title = section.querySelector("h2");
@@ -489,6 +489,63 @@ function escapeHtml(text) {
     .replace(/"/g, "&quot;");
 }
 
+function clearSaleForm() {
+  const ids = ["sale_cliente", "sale_valor", "sale_competidor", "sale_detalhe"];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  const saleStatus = document.getElementById("sale_status");
+  if (saleStatus) saleStatus.value = "Em Negociacao";
+  const saleMotivo = document.getElementById("sale_motivo");
+  if (saleMotivo) saleMotivo.value = "Sem Motivo";
+  const saleData = document.getElementById("sale_data");
+  if (saleData) saleData.valueAsDate = new Date();
+}
+
+function clearChurnForm() {
+  const ids = ["churn_cliente", "churn_valor_mensal"];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  const churnMotivo = document.getElementById("churn_motivo");
+  if (churnMotivo) churnMotivo.value = "Sem Motivo";
+  const churnData = document.getElementById("churn_data");
+  if (churnData) churnData.valueAsDate = new Date();
+}
+
+function clearNpsForm() {
+  const ids = ["nps_cliente", "nps_nota", "nps_comentario"];
+  ids.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.value = "";
+  });
+  const npsData = document.getElementById("nps_data");
+  if (npsData) npsData.valueAsDate = new Date();
+}
+
+function toggleFormFields(tipo) {
+  const groups = {
+    comercial: document.getElementById("form-group-comercial"),
+    churn: document.getElementById("form-group-churn"),
+    nps: document.getElementById("form-group-nps")
+  };
+  Object.entries(groups).forEach(([key, el]) => {
+    if (!el) return;
+    const active = key === tipo;
+    el.classList.toggle("hidden", !active);
+    el.classList.toggle("is-active", active);
+  });
+
+  const action = document.getElementById("btn-save-registro");
+  if (action) {
+    if (tipo === "comercial") action.textContent = "Salvar venda";
+    if (tipo === "churn") action.textContent = "Confirmar churn";
+    if (tipo === "nps") action.textContent = "Salvar feedback NPS";
+  }
+}
+
 function renderLogsTable(logs) {
   const source = Array.isArray(logs) ? logs : [];
   let filtered = source;
@@ -609,6 +666,7 @@ async function salvarSale() {
     };
     if (!payload.cliente || !payload.data) throw new Error("Cliente e data são obrigatórios.");
     await apiService.createSale(payload);
+    clearSaleForm();
     toast("Registro comercial salvo.");
     await carregarTudo();
   } catch (error) {
@@ -627,6 +685,7 @@ async function salvarChurn() {
     };
     if (!payload.cliente || !payload.dataChurn) throw new Error("Cliente e data do churn são obrigatórios.");
     await apiService.createChurn(payload);
+    clearChurnForm();
     toast("Churn registrado.");
     await carregarTudo();
   } catch (error) {
@@ -645,6 +704,7 @@ async function salvarNPS() {
     };
     if (!payload.cliente || payload.notaNPS === "") throw new Error("Cliente e nota são obrigatórios.");
     await apiService.createNps(payload);
+    clearNpsForm();
     toast("NPS registrado.");
     await carregarTudo();
   } catch (error) {
@@ -844,9 +904,23 @@ function bindEvents() {
   document.getElementById("nav-lancamentos")?.addEventListener("click", () => switchTab("lancamentos"));
   document.getElementById("nav-clientes")?.addEventListener("click", () => switchTab("clientes"));
   document.getElementById("nav-logs")?.addEventListener("click", () => switchTab("logs"));
-  document.getElementById("btn-save-sale")?.addEventListener("click", salvarSale);
-  document.getElementById("btn-save-churn")?.addEventListener("click", salvarChurn);
-  document.getElementById("btn-save-nps")?.addEventListener("click", salvarNPS);
+  const registroTipo = document.getElementById("registro_tipo");
+  if (registroTipo) {
+    toggleFormFields(registroTipo.value || "comercial");
+    registroTipo.addEventListener("change", () => {
+      const tipo = registroTipo.value || "comercial";
+      if (tipo !== "comercial") clearSaleForm();
+      if (tipo !== "churn") clearChurnForm();
+      if (tipo !== "nps") clearNpsForm();
+      toggleFormFields(tipo);
+    });
+  }
+  document.getElementById("btn-save-registro")?.addEventListener("click", async () => {
+    const tipo = document.getElementById("registro_tipo")?.value || "comercial";
+    if (tipo === "comercial") return salvarSale();
+    if (tipo === "churn") return salvarChurn();
+    return salvarNPS();
+  });
   document.getElementById("btn-export")?.addEventListener("click", baixarPlanilha);
   document.getElementById("btn-export-clients")?.addEventListener("click", baixarRelatorioClientes);
   document.getElementById("btn-logout")?.addEventListener("click", logout);
@@ -866,6 +940,11 @@ function bindEvents() {
   document.getElementById("btn-post-client-open-launch")?.addEventListener("click", () => {
     document.getElementById("post-client-modal")?.close();
     switchTab("lancamentos");
+    const tipo = document.getElementById("registro_tipo");
+    if (tipo) {
+      tipo.value = "comercial";
+      toggleFormFields("comercial");
+    }
     const saleCliente = document.getElementById("sale_cliente");
     if (saleCliente && lastCreatedClientName) {
       saleCliente.value = lastCreatedClientName;

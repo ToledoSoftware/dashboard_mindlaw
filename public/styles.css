@@ -66,6 +66,23 @@ body::before {
   backdrop-filter: blur(8px);
 }
 
+.launch-panel {
+  background: rgba(0, 34, 40, 0.86);
+  border-color: rgba(197, 160, 89, 0.15);
+  backdrop-filter: blur(12px);
+}
+
+.launch-group {
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.launch-group.is-active {
+  opacity: 1;
+  transform: translateY(0);
+}
+
 .drawer-backdrop {
   position: fixed;
   inset: 0;
