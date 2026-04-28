@@ -1,8 +1,10 @@
-const chartState = { loss: null, closure: null, nps: null, clientEntradas: null };
+const chartState = { loss: null, closure: null, nps: null, clientEntradas: null, clientResumo: null };
 let currentFilters = {};
 let currentClientList = [];
 let editingClientId = null;
 let lastCreatedClientName = "";
+let rawLogsCache = [];
+let interactiveFilter = null;
 
 const CLIENT_STATUS_LABELS = {
   cliente: "Cliente (ativo)",
@@ -211,6 +213,14 @@ function money(value) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value || 0);
 }
 
+function normalizeText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 function renderComercialKpis(kpis) {
   document.getElementById("kpi-ltv").textContent = money(kpis.ltvEstimado || 0);
   document.getElementById("kpi-conv").textContent = `${(kpis.taxaConversao || 0).toFixed(1)}%`;
@@ -243,7 +253,24 @@ function renderComercialCharts(commercial) {
         borderWidth: 0
       }]
     },
-    options: { maintainAspectRatio: false, plugins: { legend: { labels: { color: "#FFFFFF" } } } }
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: "#FFFFFF" } } },
+      onClick: (_evt, elements) => {
+        if (!elements.length) return;
+        const idx = elements[0].index;
+        const labels = ["Ganho", "Perdido", "Em Negociação"];
+        const selected = labels[idx];
+        if (!selected) return;
+        const key = normalizeText(selected);
+        interactiveFilter = interactiveFilter?.type === "commercialStatus" && interactiveFilter?.value === key
+          ? null
+          : { type: "commercialStatus", value: key };
+        renderLogsTable(rawLogsCache);
+        switchTab("logs");
+        toast(interactiveFilter ? `Filtro Comercial: ${selected}` : "Filtro Comercial removido.");
+      }
+    }
   });
 
   const reasonLabels = Object.keys(reasons);
@@ -277,11 +304,89 @@ function renderComercialCharts(commercial) {
   });
 }
 
+function buildClientStatsFromList(clients) {
+  const byStatus = {};
+  let total = 0;
+  (Array.isArray(clients) ? clients : []).forEach((c) => {
+    const st = c?.statusContrato || "cliente";
+    byStatus[st] = (byStatus[st] || 0) + 1;
+    total += 1;
+  });
+  return { byStatus, total };
+}
+
+function applyClientStatusFilter(status) {
+  const selected = String(status || "");
+  const dropdown = document.getElementById("filter-client-status");
+  if (dropdown) dropdown.value = selected;
+  currentFilters = {
+    ...currentFilters,
+    clientStatus: selected
+  };
+  localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+  carregarTudo().catch((error) => toast(error.message || "Erro ao aplicar filtro de cliente."));
+  switchTab("clientes");
+}
+
+function renderClientStatusWidget({ byStatus, total, chartId, legendId, kpiId, clickableLegend = false }) {
+  const kpi = document.getElementById(kpiId);
+  if (kpi) kpi.textContent = String(total || 0);
+  const leg = document.getElementById(legendId);
+  if (leg) {
+    leg.innerHTML = CLIENT_STATUS_CHART_ORDER.map((k) => {
+      const n = byStatus[k] || 0;
+      const c = CLIENT_CHART_COLORS[k] || "#94a3b8";
+      const label = CLIENT_STATUS_LABELS[k] || k;
+      const attrs = clickableLegend ? `data-client-status-filter="${k}"` : "";
+      const hover = clickableLegend ? "hover:border-mindlaw-gold/60 cursor-pointer" : "";
+      return `<li ${attrs} class="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-mindlaw-teal/40 px-2 py-1 ${hover}"><span class="h-2 w-2 rounded-full" style="background:${c}"></span>${label}: <strong class="text-mindlaw-white">${n}</strong></li>`;
+    }).join("");
+  }
+  const el = document.getElementById(chartId);
+  if (!el) return;
+  const cctx = el.getContext("2d");
+  const labels = [];
+  const data = [];
+  const bg = [];
+  const statusKeys = [];
+  for (const k of CLIENT_STATUS_CHART_ORDER) {
+    const n = byStatus[k] || 0;
+    if (n > 0) {
+      labels.push(CLIENT_STATUS_LABELS[k] || k);
+      data.push(n);
+      bg.push(CLIENT_CHART_COLORS[k] || "#94a3b8");
+      statusKeys.push(k);
+    }
+  }
+  const keyState = chartId === "chartClientesResumo" ? "clientResumo" : "clientEntradas";
+  if (chartState[keyState]) chartState[keyState].destroy();
+  if (!labels.length) {
+    chartState[keyState] = new Chart(cctx, {
+      type: "doughnut",
+      data: { labels: ["Sem dados"], datasets: [{ data: [1], backgroundColor: ["#374151"], borderWidth: 0 }] },
+      options: { maintainAspectRatio: false, plugins: { legend: { labels: { color: "#FFFFFF" } } } }
+    });
+    return;
+  }
+  chartState[keyState] = new Chart(cctx, {
+    type: "doughnut",
+    data: { labels, datasets: [{ data, backgroundColor: bg, borderWidth: 0 }] },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { position: "bottom", labels: { color: "#FFFFFF" } } },
+      onClick: (_evt, elements) => {
+        if (!clickableLegend || !elements.length) return;
+        const idx = elements[0].index;
+        const status = statusKeys[idx];
+        if (status) applyClientStatusFilter(status);
+      }
+    }
+  });
+}
+
 function renderClientEntradaPanel(stats) {
   const byStatus = (stats && stats.byStatus) || {};
   const total = typeof stats?.total === "number" ? stats.total : 0;
-  const kpi = document.getElementById("kpi-client-entradas-total");
-  if (kpi) kpi.textContent = String(total);
   const periodEl = document.getElementById("client-dashboard-period");
   if (periodEl) {
     if (stats && stats.range && stats.range.start) {
@@ -292,48 +397,13 @@ function renderClientEntradaPanel(stats) {
       periodEl.textContent = "Sem mês/ano ou intervalo no header: contagem geral da base, por status.";
     }
   }
-  const leg = document.getElementById("client-dashboard-legend");
-  if (leg) {
-    leg.innerHTML = CLIENT_STATUS_CHART_ORDER.map((k) => {
-      const n = byStatus[k] || 0;
-      const c = CLIENT_CHART_COLORS[k] || "#94a3b8";
-      const label = CLIENT_STATUS_LABELS[k] || k;
-      return `<li class="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-mindlaw-teal/40 px-2 py-1"><span class="h-2 w-2 rounded-full" style="background:${c}"></span>${label}: <strong class="text-mindlaw-white">${n}</strong></li>`;
-    }).join("");
-  }
-  const el = document.getElementById("chartClientesEntradas");
-  if (!el) return;
-  const cctx = el.getContext("2d");
-  const labels = [];
-  const data = [];
-  const bg = [];
-  for (const k of CLIENT_STATUS_CHART_ORDER) {
-    const n = byStatus[k] || 0;
-    if (n > 0) {
-      labels.push(CLIENT_STATUS_LABELS[k] || k);
-      data.push(n);
-      bg.push(CLIENT_CHART_COLORS[k] || "#94a3b8");
-    }
-  }
-  if (chartState.clientEntradas) chartState.clientEntradas.destroy();
-  if (labels.length === 0) {
-    chartState.clientEntradas = new Chart(cctx, {
-      type: "doughnut",
-      data: {
-        labels: ["Sem entradas neste recorte"],
-        datasets: [{ data: [1], backgroundColor: ["#374151"], borderWidth: 0 }]
-      },
-      options: { maintainAspectRatio: false, plugins: { legend: { labels: { color: "#FFFFFF" } } } }
-    });
-    return;
-  }
-  chartState.clientEntradas = new Chart(cctx, {
-    type: "doughnut",
-    data: { labels, datasets: [{ data, backgroundColor: bg, borderWidth: 0 }] },
-    options: {
-      maintainAspectRatio: false,
-      plugins: { legend: { position: "bottom", labels: { color: "#FFFFFF" } } }
-    }
+  renderClientStatusWidget({
+    byStatus,
+    total,
+    chartId: "chartClientesEntradas",
+    legendId: "client-dashboard-legend",
+    kpiId: "kpi-client-entradas-total",
+    clickableLegend: true
   });
 }
 
@@ -354,8 +424,21 @@ function renderSupportCharts(supportDashboard) {
     })
     .join("");
 
-  const npsDist = supportDashboard.npsDistribution || { Promotor: 0, Neutro: 0, Detrator: 0 };
-  const totalNps = (npsDist.Promotor || 0) + (npsDist.Neutro || 0) + (npsDist.Detrator || 0);
+  let npsDist = supportDashboard.npsDistribution || { Promotor: 0, Neutro: 0, Detrator: 0 };
+  let totalNps = (npsDist.Promotor || 0) + (npsDist.Neutro || 0) + (npsDist.Detrator || 0);
+  // Fallback para bases legadas sem categoriaNPS preenchida: deriva pelos valores de notaNPS.
+  if (!totalNps && Array.isArray(supportDashboard.support)) {
+    const npsRows = supportDashboard.support.filter((item) => {
+      const nota = Number(item?.notaNPS);
+      return !Number.isNaN(nota) && nota >= 0 && nota <= 10;
+    });
+    npsDist = {
+      Promotor: npsRows.filter((item) => Number(item.notaNPS) >= 9).length,
+      Neutro: npsRows.filter((item) => Number(item.notaNPS) >= 7 && Number(item.notaNPS) <= 8).length,
+      Detrator: npsRows.filter((item) => Number(item.notaNPS) <= 6).length
+    };
+    totalNps = npsDist.Promotor + npsDist.Neutro + npsDist.Detrator;
+  }
   const npsScore = totalNps ? (((npsDist.Promotor || 0) - (npsDist.Detrator || 0)) / totalNps) * 100 : 0;
   const npsScoreText = `${npsScore.toFixed(1)}`;
   const kpiNps = document.getElementById("kpi-nps");
@@ -377,7 +460,23 @@ function renderSupportCharts(supportDashboard) {
         borderWidth: 0
       }]
     },
-    options: { maintainAspectRatio: false, plugins: { legend: { labels: { color: "#FFFFFF" } } } }
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: "#FFFFFF" } } },
+      onClick: (_evt, elements) => {
+        if (!elements.length) return;
+        const labels = ["Promotor", "Neutro", "Detrator"];
+        const selected = labels[elements[0].index];
+        if (!selected) return;
+        const key = normalizeText(selected);
+        interactiveFilter = interactiveFilter?.type === "supportNps" && interactiveFilter?.value === key
+          ? null
+          : { type: "supportNps", value: key };
+        renderLogsTable(rawLogsCache);
+        switchTab("logs");
+        toast(interactiveFilter ? `Filtro Suporte: ${selected}` : "Filtro Suporte removido.");
+      }
+    }
   });
   document.getElementById("kpi-resumo-mrr").textContent = money(supportDashboard.totalMrrPerdido || 0);
 }
@@ -391,6 +490,14 @@ function escapeHtml(text) {
 }
 
 function renderLogsTable(logs) {
+  const source = Array.isArray(logs) ? logs : [];
+  let filtered = source;
+  if (interactiveFilter?.type === "commercialStatus") {
+    filtered = source.filter((item) => normalizeText(item.tipo) === "comercial" && normalizeText(item.status) === interactiveFilter.value);
+  }
+  if (interactiveFilter?.type === "supportNps") {
+    filtered = source.filter((item) => normalizeText(item.tipo) === "nps" && normalizeText(item.status).includes(interactiveFilter.value));
+  }
   const statusClass = (value) => {
     const normalized = String(value || "").toLowerCase();
     if (normalized.includes("ganho")) return "status-ganho";
@@ -399,8 +506,8 @@ function renderLogsTable(logs) {
   };
 
   const body = document.getElementById("logs-table");
-  body.innerHTML = logs.length
-    ? logs.map((item) => `<tr>
+  body.innerHTML = filtered.length
+    ? filtered.map((item) => `<tr>
       <td class="px-6 py-4">${item.tipo}</td>
       <td class="px-6 py-4">${item.cliente || "-"}</td>
       <td class="px-6 py-4">${item.data ? new Date(item.data).toLocaleDateString("pt-BR") : "-"}</td>
@@ -597,23 +704,33 @@ async function baixarPlanilha() {
 
 async function carregarTudo() {
   const query = buildFilterQuery(currentFilters);
-  const [commercial, support, logs] = await Promise.all([
+  const [commercial, support, logs, _forms, clientsResponse] = await Promise.all([
     apiService.commercialDashboard(query),
     apiService.supportDashboard(query),
     apiService.logs(query),
-    refreshClientOptionsForForms()
+    refreshClientOptionsForForms(),
+    apiService.clients(buildFilterQuery(currentFilters))
   ]);
   renderComercialKpis(commercial.kpis || {});
   renderSupportKpis(support.kpis || {});
   renderComercialCharts(commercial);
   renderSupportCharts(support);
-  renderLogsTable(logs.logs || []);
+  rawLogsCache = logs.logs || [];
+  renderLogsTable(rawLogsCache);
 
   // Lista de clientes vem do dashboard de suporte (mesma auth que já funciona),
   // e recebe os filtros dedicados da aba de clientes.
-  renderClientEntradaPanel(support.clientEntradaStats || {});
-  const clientsResponse = await apiService.clients(buildFilterQuery(currentFilters));
+  const statsBase = support.clientEntradaStats || {};
+  renderClientEntradaPanel(statsBase);
   renderClients(Array.isArray(clientsResponse.clients) ? clientsResponse.clients : []);
+  renderClientStatusWidget({
+    byStatus: statsBase.byStatus || {},
+    total: typeof statsBase.total === "number" ? statsBase.total : 0,
+    chartId: "chartClientesResumo",
+    legendId: "client-resumo-legend",
+    kpiId: "kpi-resumo-clientes-total",
+    clickableLegend: true
+  });
   syncSectionPeriodInputs();
 }
 
@@ -816,6 +933,18 @@ function bindEvents() {
     const trigger = event.target.closest("[data-client-edit]");
     if (!trigger) return;
     openClientEditModal(trigger.getAttribute("data-client-edit"));
+  });
+  document.addEventListener("click", (event) => {
+    const navTrigger = event.target.closest("[data-go-tab]");
+    if (!navTrigger) return;
+    const tab = navTrigger.getAttribute("data-go-tab");
+    if (tab) switchTab(tab);
+  });
+  document.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-client-status-filter]");
+    if (!target) return;
+    const status = target.getAttribute("data-client-status-filter");
+    if (status) applyClientStatusFilter(status);
   });
   document.getElementById("btn-client-edit-save")?.addEventListener("click", salvarEdicaoCliente);
   document.getElementById("btn-client-edit-close")?.addEventListener("click", () => {

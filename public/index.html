@@ -70,11 +70,30 @@
       <section id="view-resumo" class="tab-view space-y-6">
         <h2 class="text-center text-3xl font-extrabold tracking-tight">Visão Geral</h2>
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">Receita Ganha (Período)</p><p id="kpi-resumo-receita" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">R$ 0</p></article>
-          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">MRR Perdido (Período)</p><p id="kpi-resumo-mrr" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">R$ 0</p></article>
-          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">Churn Rate</p><p id="kpi-resumo-churn" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p></article>
-          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">NPS Score</p><p id="kpi-resumo-nps" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">0%</p></article>
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 cursor-pointer hover:border-mindlaw-gold/60" data-go-tab="comercial"><p class="text-xs text-mindlaw-white/70">Receita Ganha (Período)</p><p id="kpi-resumo-receita" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">R$ 0</p></article>
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 cursor-pointer hover:border-mindlaw-gold/60" data-go-tab="suporte"><p class="text-xs text-mindlaw-white/70">MRR Perdido (Período)</p><p id="kpi-resumo-mrr" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">R$ 0</p></article>
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 cursor-pointer hover:border-mindlaw-gold/60" data-go-tab="suporte"><p class="text-xs text-mindlaw-white/70">Churn Rate</p><p id="kpi-resumo-churn" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p></article>
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 cursor-pointer hover:border-mindlaw-gold/60" data-go-tab="suporte"><p class="text-xs text-mindlaw-white/70">NPS Score</p><p id="kpi-resumo-nps" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">0%</p></article>
         </div>
+        <article class="panel border-t-2 border-mindlaw-gold p-6 space-y-4">
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h3 class="text-lg font-semibold">Base Geral de Clientes</h3>
+              <p class="text-xs text-mindlaw-white/60">Visão geral sem aplicar filtro de período.</p>
+            </div>
+            <p class="text-xs text-mindlaw-white/65">Clique na legenda para filtrar Clientes.</p>
+          </div>
+          <div class="grid grid-cols-1 items-center gap-6 lg:grid-cols-2">
+            <div class="text-center">
+              <p class="text-xs text-mindlaw-white/50">Total na base</p>
+              <p id="kpi-resumo-clientes-total" class="mt-1 font-mono text-4xl font-extrabold text-mindlaw-gold">0</p>
+            </div>
+            <div class="h-64 w-full max-w-md justify-self-center lg:max-w-full">
+              <canvas id="chartClientesResumo"></canvas>
+            </div>
+          </div>
+          <ul id="client-resumo-legend" class="flex flex-wrap gap-2 text-xs text-mindlaw-white/80"></ul>
+        </article>
       </section>
 
       <section id="view-comercial" class="tab-view space-y-6">
