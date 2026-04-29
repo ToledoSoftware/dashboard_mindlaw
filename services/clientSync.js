@@ -215,6 +215,20 @@ async function listAllClientsSorted(query = {}) {
   const filter = {};
   const st = String(query.clientStatus || query.statusContrato || "").trim();
   if (st && STATUS_CONTRATO.includes(st)) filter.statusContrato = st;
+  const planKey = String(query.clientPlan || "").trim().toLowerCase();
+  if (planKey) {
+    if (planKey === "sem_plano") {
+      filter.$or = [
+        { plano: { $exists: false } },
+        { plano: null },
+        { plano: "" }
+      ];
+    } else if (planKey === "outros") {
+      filter.plano = { $regex: "^(?!.*starter)(?!.*premium)(?!.*advanced).+$", $options: "i" };
+    } else {
+      filter.plano = { $regex: planKey, $options: "i" };
+    }
+  }
   const segment = String(query.clientSegment || "").trim();
   if (!filter.statusContrato && segment === "clientes") {
     filter.statusContrato = { $ne: "novo_lead" };

@@ -1,4 +1,4 @@
-const chartState = { loss: null, closure: null, nps: null, clientEntradas: null, clientResumo: null };
+const chartState = { loss: null, closure: null, nps: null, clientEntradas: null, clientResumo: null, clientPlanos: null };
 let currentFilters = {};
 let currentClientList = [];
 let currentClientRawList = [];
@@ -25,6 +25,13 @@ const CLIENT_CHART_COLORS = {
   pagamento_recusado: "#fb923c",
   cancelado: "#f87171",
   novo_lead: "#60a5fa"
+};
+const PLAN_CHART_COLORS = {
+  starter: "#60a5fa",
+  premium: "#c5a059",
+  advanced: "#34d399",
+  outros: "#a78bfa",
+  sem_plano: "#6b7280"
 };
 
 function toast(msg) {
@@ -330,6 +337,30 @@ function buildClientStatsFromList(clients) {
   return { byStatus, total };
 }
 
+function buildClientPlanStats(clients) {
+  const byPlan = {};
+  (Array.isArray(clients) ? clients : []).forEach((c) => {
+    const raw = normalizeText(c?.plano || "");
+    let key = "sem_plano";
+    if (raw.includes("starter")) key = "starter";
+    else if (raw.includes("premium")) key = "premium";
+    else if (raw.includes("advanced")) key = "advanced";
+    else if (raw) key = "outros";
+    byPlan[key] = (byPlan[key] || 0) + 1;
+  });
+  return byPlan;
+}
+
+function buildGeneralClientFilters(filters = {}) {
+  return {
+    month: filters.month || "",
+    year: filters.year || "",
+    startDate: filters.startDate || "",
+    endDate: filters.endDate || "",
+    clientStatus: "cliente"
+  };
+}
+
 function applyClientStatusFilter(status) {
   const selected = String(status || "");
   const dropdown = document.getElementById("filter-client-status");
@@ -340,6 +371,19 @@ function applyClientStatusFilter(status) {
   };
   localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
   carregarTudo().catch((error) => toast(error.message || "Erro ao aplicar filtro de cliente."));
+  switchTab("clientes");
+}
+
+function applyClientPlanFilter(planKey) {
+  const selected = String(planKey || "");
+  const planDropdown = document.getElementById("filter-client-plan");
+  if (planDropdown) planDropdown.value = selected;
+  currentFilters = {
+    ...currentFilters,
+    clientPlan: selected
+  };
+  localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+  carregarTudo().catch((error) => toast(error.message || "Erro ao aplicar filtro de plano."));
   switchTab("clientes");
 }
 
@@ -399,6 +443,57 @@ function renderClientStatusWidget({ byStatus, total, chartId, legendId, kpiId, c
   });
 }
 
+function renderClientPlanWidget(planStats) {
+  const planLabels = {
+    starter: "Starter",
+    premium: "Premium",
+    advanced: "Advanced",
+    outros: "Outros",
+    sem_plano: "Sem plano"
+  };
+  const order = ["starter", "premium", "advanced", "outros", "sem_plano"];
+  const legend = document.getElementById("client-plan-legend");
+  if (legend) {
+    legend.innerHTML = order
+      .filter((k) => (planStats[k] || 0) > 0)
+      .map((k) => `<li data-client-plan-filter="${k}" class="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-white/10 bg-mindlaw-teal/40 px-2 py-1 hover:border-mindlaw-gold/60"><span class="h-2 w-2 rounded-full" style="background:${PLAN_CHART_COLORS[k]}"></span>${planLabels[k]}: <strong class="text-mindlaw-white">${planStats[k]}</strong></li>`)
+      .join("");
+  }
+  const canvas = document.getElementById("chartClientesPlanos");
+  if (!canvas) return;
+  const labels = [];
+  const data = [];
+  const colors = [];
+  const availableOrder = order.filter((k) => (planStats[k] || 0) > 0);
+  availableOrder.forEach((k) => {
+    const n = planStats[k] || 0;
+    if (n > 0) {
+      labels.push(planLabels[k]);
+      data.push(n);
+      colors.push(PLAN_CHART_COLORS[k]);
+    }
+  });
+  const ctx = canvas.getContext("2d");
+  if (chartState.clientPlanos) chartState.clientPlanos.destroy();
+  chartState.clientPlanos = new Chart(ctx, {
+    type: "doughnut",
+    data: {
+      labels: labels.length ? labels : ["Sem dados"],
+      datasets: [{ data: data.length ? data : [1], backgroundColor: data.length ? colors : ["#374151"], borderWidth: 0 }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: "#FFFFFF" } } },
+      onClick: (_evt, elements) => {
+        if (!elements.length) return;
+        const idx = elements[0].index;
+        const key = availableOrder[idx];
+        if (key) applyClientPlanFilter(key);
+      }
+    }
+  });
+}
+
 function renderClientEntradaPanel(stats) {
   const byStatus = (stats && stats.byStatus) || {};
   const total = typeof stats?.total === "number" ? stats.total : 0;
@@ -425,6 +520,19 @@ function renderClientEntradaPanel(stats) {
 function renderSupportCharts(supportDashboard) {
   const monthCount = supportDashboard.churnByMonth || Array.from({ length: 12 }, () => 0);
   const heatmap = document.getElementById("heatmap");
+  const yearSelect = document.getElementById("support-heatmap-year");
+  if (yearSelect) {
+    if (!yearSelect.options.length) {
+      const nowYear = new Date().getFullYear();
+      for (let y = nowYear - 5; y <= nowYear + 1; y += 1) {
+        const opt = document.createElement("option");
+        opt.value = String(y);
+        opt.textContent = String(y);
+        yearSelect.appendChild(opt);
+      }
+    }
+    yearSelect.value = String(currentFilters.churnYear || supportDashboard.churnYear || new Date().getFullYear());
+  }
   const max = Math.max(...monthCount, 1);
   const monthLabels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
   heatmap.innerHTML = monthCount
@@ -805,12 +913,13 @@ async function baixarPlanilha() {
 
 async function carregarTudo() {
   const query = buildFilterQuery(currentFilters);
-  const [commercial, support, logs, _forms, clientsResponse] = await Promise.all([
+  const [commercial, support, logs, _forms, clientsResponse, activeClientsResponse] = await Promise.all([
     apiService.commercialDashboard(query),
     apiService.supportDashboard(query),
     apiService.logs(query),
     refreshClientOptionsForForms(),
-    apiService.clients(buildFilterQuery(currentFilters))
+    apiService.clients(buildFilterQuery(currentFilters)),
+    apiService.clients(buildFilterQuery(buildGeneralClientFilters(currentFilters)))
   ]);
   renderComercialKpis(commercial.kpis || {});
   renderSupportKpis(support.kpis || {});
@@ -832,6 +941,8 @@ async function carregarTudo() {
     kpiId: "kpi-resumo-clientes-total",
     clickableLegend: true
   });
+  const activeClients = Array.isArray(activeClientsResponse.clients) ? activeClientsResponse.clients : [];
+  renderClientPlanWidget(buildClientPlanStats(activeClients));
   syncSectionPeriodInputs();
 }
 
@@ -844,9 +955,11 @@ function collectFilters() {
     startDate: period.startDate,
     endDate: period.endDate,
     clientStatus: document.getElementById("filter-client-status")?.value || "",
+    clientPlan: document.getElementById("filter-client-plan")?.value || currentFilters.clientPlan || "",
     clientSegment: document.getElementById("filter-client-segment")?.value || "",
     sortBy: document.getElementById("filter-client-sort-by")?.value || "cadastro",
-    sortDir: document.getElementById("filter-client-sort-dir")?.value || "desc"
+    sortDir: document.getElementById("filter-client-sort-dir")?.value || "desc",
+    churnYear: document.getElementById("support-heatmap-year")?.value || String(currentFilters.churnYear || new Date().getFullYear())
   };
 }
 
@@ -857,9 +970,11 @@ function buildFilterQuery(filters) {
   if (filters.startDate) params.set("startDate", filters.startDate);
   if (filters.endDate) params.set("endDate", filters.endDate);
   if (filters.clientStatus) params.set("clientStatus", filters.clientStatus);
+  if (filters.clientPlan) params.set("clientPlan", filters.clientPlan);
   if (filters.clientSegment) params.set("clientSegment", filters.clientSegment);
   if (filters.sortBy) params.set("sortBy", filters.sortBy);
   if (filters.sortDir) params.set("sortDir", filters.sortDir);
+  if (filters.churnYear) params.set("churnYear", filters.churnYear);
   const query = params.toString();
   return query ? `?${query}` : "";
 }
@@ -894,6 +1009,8 @@ function restoreFilters() {
   if (stSel) stSel.value = parsed.clientStatus || "";
   const segmentSel = document.getElementById("filter-client-segment");
   if (segmentSel) segmentSel.value = parsed.clientSegment || "";
+  const planSel = document.getElementById("filter-client-plan");
+  if (planSel) planSel.value = parsed.clientPlan || "";
   const sortBySel = document.getElementById("filter-client-sort-by");
   if (sortBySel) sortBySel.value = parsed.sortBy || "cadastro";
   const sortDirSel = document.getElementById("filter-client-sort-dir");
@@ -903,6 +1020,7 @@ function restoreFilters() {
     searchInput.value = parsed.clientSearch || "";
     clientsSearchTerm = searchInput.value;
   }
+  currentFilters.churnYear = parsed.churnYear || String(new Date().getFullYear());
   const pageSizeSel = document.getElementById("clients-page-size");
   if (pageSizeSel) {
     pageSizeSel.value = parsed.clientsPageSize || "25";
@@ -911,10 +1029,12 @@ function restoreFilters() {
   currentFilters = {
     ...currentFilters,
     clientStatus: parsed.clientStatus || "",
+    clientPlan: parsed.clientPlan || "",
     clientSegment: parsed.clientSegment || "",
     sortBy: parsed.sortBy || "cadastro",
     sortDir: parsed.sortDir || "desc",
-    clientSearch: parsed.clientSearch || ""
+    clientSearch: parsed.clientSearch || "",
+    churnYear: parsed.churnYear || String(new Date().getFullYear())
   };
   syncSectionPeriodInputs();
 }
@@ -1061,14 +1181,55 @@ function bindEvents() {
   };
   document.getElementById("filter-client-status")?.addEventListener("change", reloadClients);
   document.getElementById("filter-client-segment")?.addEventListener("change", reloadClients);
+  document.getElementById("filter-client-plan")?.addEventListener("change", reloadClients);
   document.getElementById("filter-client-sort-by")?.addEventListener("change", reloadClients);
   document.getElementById("filter-client-sort-dir")?.addEventListener("change", reloadClients);
+  document.getElementById("btn-clear-client-filters")?.addEventListener("click", async () => {
+    const setVal = (id, v) => {
+      const el = document.getElementById(id);
+      if (el) el.value = v;
+    };
+    setVal("filter-client-segment", "");
+    setVal("filter-client-plan", "");
+    setVal("filter-client-status", "");
+    setVal("filter-client-sort-by", "cadastro");
+    setVal("filter-client-sort-dir", "desc");
+    setVal("filter-client-search", "");
+    clientsSearchTerm = "";
+    clientsPage = 1;
+    currentFilters = {
+      ...currentFilters,
+      clientSegment: "",
+      clientPlan: "",
+      clientStatus: "",
+      sortBy: "cadastro",
+      sortDir: "desc",
+      clientSearch: ""
+    };
+    localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+    try {
+      await carregarTudo();
+      toast("Filtros de clientes limpos.");
+    } catch (error) {
+      toast(error.message || "Erro ao limpar filtros.");
+    }
+  });
   document.getElementById("filter-client-search")?.addEventListener("input", (event) => {
     clientsSearchTerm = event.target.value || "";
     clientsPage = 1;
     currentFilters = { ...currentFilters, clientSearch: clientsSearchTerm };
     localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
     renderClients(Array.isArray(currentClientRawList) ? currentClientRawList : []);
+  });
+  document.getElementById("support-heatmap-year")?.addEventListener("change", async (event) => {
+    currentFilters = { ...currentFilters, churnYear: event.target.value || String(new Date().getFullYear()) };
+    localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+    try {
+      await carregarTudo();
+      toast("Ano do churn atualizado.");
+    } catch (error) {
+      toast(error.message || "Erro ao atualizar ano do churn.");
+    }
   });
   document.getElementById("clients-page-size")?.addEventListener("change", async (event) => {
     clientsPageSize = Number(event.target.value || 25);
@@ -1101,6 +1262,12 @@ function bindEvents() {
     if (!target) return;
     const status = target.getAttribute("data-client-status-filter");
     if (status) applyClientStatusFilter(status);
+  });
+  document.addEventListener("click", (event) => {
+    const target = event.target.closest("[data-client-plan-filter]");
+    if (!target) return;
+    const plan = target.getAttribute("data-client-plan-filter");
+    if (plan) applyClientPlanFilter(plan);
   });
   document.getElementById("btn-client-edit-save")?.addEventListener("click", salvarEdicaoCliente);
   document.getElementById("btn-client-edit-close")?.addEventListener("click", () => {

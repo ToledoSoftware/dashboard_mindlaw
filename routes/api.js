@@ -188,6 +188,20 @@ function filterSupportByRange(support, range) {
   });
 }
 
+function getSaoPauloMonthYear(value) {
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Sao_Paulo",
+    year: "numeric",
+    month: "2-digit"
+  }).formatToParts(dt);
+  const year = Number(parts.find((p) => p.type === "year")?.value || 0);
+  const month = Number(parts.find((p) => p.type === "month")?.value || 0);
+  if (!year || !month) return null;
+  return { year, month };
+}
+
 router.get("/sales", async (_req, res) => {
   try {
     const [salesRaw, support] = await Promise.all([
@@ -235,8 +249,9 @@ router.get("/support", async (_req, res) => {
 router.post("/support", async (req, res) => {
   try {
     const payload = req.body || {};
+    const registerType = payload.registerType || (payload.notaNPS !== undefined && payload.notaNPS !== "" ? "nps" : "churn");
     const support = await Support.create({
-      registerType: payload.registerType || (payload.notaNPS !== undefined && payload.notaNPS !== "" ? "nps" : "churn"),
+      registerType,
       cliente: payload.cliente,
       valorPerdido: Number(payload.valorPerdido || 0),
       dataChurn: payload.dataChurn || null,
@@ -245,7 +260,11 @@ router.post("/support", async (req, res) => {
       comentarioNPS: payload.comentarioNPS || "",
       dataNPS: payload.dataNPS || null
     });
-    await ensureClientByName(payload.cliente);
+    if (registerType === "churn") {
+      await ensureClientByName(payload.cliente, { statusContrato: "cancelado" });
+    } else {
+      await ensureClientByName(payload.cliente);
+    }
     return res.status(201).json({ status: "ok", data: support });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao salvar dado de suporte." });
@@ -262,7 +281,7 @@ router.post("/support/churn", async (req, res) => {
       dataChurn: payload.dataChurn || null,
       motivoPrincipal: payload.motivoPrincipal || "Sem Motivo"
     });
-    await ensureClientByName(payload.cliente);
+    await ensureClientByName(payload.cliente, { statusContrato: "cancelado" });
     return res.status(201).json({ status: "ok", data: support });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao salvar churn." });
@@ -433,17 +452,7 @@ router.get("/support/dashboard", async (_req, res) => {
     const support = filterSupportByRange(supportRaw, range);
     const now = new Date();
     const monthStart = range ? range.start : startOfMonth(now);
-    const prevMonthEnd = new Date(monthStart.getTime() - 1);
-
-    const sales = await Sale.find().lean();
-    const activeClientsAtMonthStart = new Set();
-    sales.forEach((sale) => {
-      if (!["Ganho", "Em Negociacao"].includes(sale.status)) return;
-      const saleDate = new Date(sale.data);
-      if (saleDate <= prevMonthEnd) {
-        activeClientsAtMonthStart.add(String(sale.cliente || "").trim().toLowerCase());
-      }
-    });
+    const churnYear = Number(_req.query?.churnYear || now.getFullYear());
 
     const churnThisMonth = support.filter((item) => {
       if (classifySupport(item) !== "churn" || !item.dataChurn) return false;
@@ -454,17 +463,20 @@ router.get("/support/dashboard", async (_req, res) => {
     const cancelledClients = new Set();
     churnThisMonth.forEach((item) => cancelledClients.add(String(item.cliente || "").trim().toLowerCase()));
 
-    const activeCount = activeClientsAtMonthStart.size;
+    const activeCount = await Client.countDocuments({ statusContrato: "cliente" });
     const churnRate = activeCount ? (cancelledClients.size / activeCount) * 100 : 0;
 
     const npsDocs = support.filter((item) => classifySupport(item) === "nps");
     const npsScore = computeNpsScore(npsDocs);
 
     const churnByMonth = Array.from({ length: 12 }, () => 0);
-    support
+    supportRaw
       .filter((item) => classifySupport(item) === "churn" && item.dataChurn)
       .forEach((item) => {
-        churnByMonth[new Date(item.dataChurn).getMonth()] += 1;
+        const ref = getSaoPauloMonthYear(item.dataChurn);
+        if (!ref) return;
+        if (ref.year !== churnYear) return;
+        churnByMonth[ref.month - 1] += 1;
       });
 
     const npsDistribution = {
@@ -494,6 +506,7 @@ router.get("/support/dashboard", async (_req, res) => {
         npsScore
       },
       churnByMonth,
+      churnYear,
       npsDistribution,
       support,
       clients,
