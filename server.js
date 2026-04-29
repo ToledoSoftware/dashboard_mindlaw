@@ -195,8 +195,14 @@ async function bootstrap() {
     throw new Error("JWT_SECRET não configurado no ambiente.");
   }
 
-  await mongoose.connect(MONGODB_URI);
-  console.log("MongoDB conectado.");
+  try {
+    await mongoose.connect(MONGODB_URI);
+    console.log("MongoDB conectado.");
+  } catch (error) {
+    console.error("[MindLaw] Falha ao conectar no MongoDB Atlas.");
+    console.error("[MindLaw] Em deploy (Vercel), isso pode ocorrer em cold start por variáveis de ambiente ausentes ou rede momentaneamente indisponível.");
+    throw error;
+  }
 
   await seedDefaultUser();
 
@@ -221,12 +227,18 @@ async function bootstrap() {
     console.error("Aviso: sincronizacao de clientes na subida:", error.message);
   }
 
-  app.listen(PORT, () => {
-    console.log(`Servidor MindLaw ativo na porta ${PORT}`);
-  });
+  if (process.env.NODE_ENV !== "production") {
+    app.listen(PORT, () => {
+      console.log(`Servidor MindLaw ativo na porta ${PORT}`);
+    });
+  }
 }
 
 bootstrap().catch((error) => {
   console.error("Erro ao iniciar servidor:", error.message);
-  process.exit(1);
+  if (process.env.NODE_ENV !== "production") {
+    process.exit(1);
+  }
 });
+
+module.exports = app;
