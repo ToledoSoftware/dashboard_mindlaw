@@ -133,6 +133,15 @@
               </div>
             </div>
             <div id="heatmap" class="grid grid-cols-6 gap-2 text-xs"></div>
+            <div class="mt-4 rounded-xl border border-white/10 bg-mindlaw-teal/35 p-4">
+              <div class="mb-2 flex items-center justify-between gap-2">
+                <h4 id="support-month-detail-title" class="text-sm font-semibold text-mindlaw-white/90">Detalhes do mês</h4>
+                <span class="text-xs text-mindlaw-white/60">Clique em um card do mês</span>
+              </div>
+              <div id="support-month-detail-list" class="space-y-2 text-sm text-mindlaw-white/80">
+                <p class="text-mindlaw-white/60">Selecione um mês para listar os churns cadastrados.</p>
+              </div>
+            </div>
           </article>
           <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6"><h3 class="mb-4 text-lg font-semibold tracking-tight text-mindlaw-white/85">Voz do Cliente (Distribuicao NPS)</h3><div class="h-72"><canvas id="chartNps"></canvas></div></article>
         </div>
@@ -291,6 +300,18 @@
 
       <section id="view-logs" class="tab-view hidden space-y-6">
         <h2 class="text-center text-3xl font-extrabold tracking-tight">Logs de Dados</h2>
+        <article class="panel border-t-2 border-mindlaw-gold p-4">
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <select id="filter-logs-type" class="input-ui">
+              <option value="">Todos os tipos</option>
+              <option value="comercial">Comercial</option>
+              <option value="churn">Churn</option>
+              <option value="nps">NPS</option>
+            </select>
+            <input id="filter-logs-search" type="text" placeholder="Buscar por cliente ou detalhe" class="input-ui" />
+            <button id="btn-clear-logs-filters" class="rounded-xl border border-white/20 px-4 py-2 text-sm hover:border-mindlaw-gold/60">Limpar filtros de logs</button>
+          </div>
+        </article>
         <article class="panel border-t-2 border-mindlaw-gold overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full min-w-[760px] text-left text-sm">
@@ -301,6 +322,7 @@
                   <th class="px-6 py-4">Data</th>
                   <th class="px-6 py-4">Status</th>
                   <th class="px-6 py-4">Detalhe</th>
+                  <th class="px-6 py-4">Ações</th>
                 </tr>
               </thead>
               <tbody id="logs-table" class="divide-y divide-white/5"></tbody>
@@ -378,6 +400,18 @@
         <button id="btn-post-client-open-launch" type="button" class="btn-gold !px-4 !py-2">Ir para Centro de Lançamentos</button>
         <button id="btn-post-client-later" type="button" class="rounded-lg border border-white/20 px-4 py-2 text-sm hover:border-mindlaw-gold/50">Depois</button>
       </div>
+    </div>
+  </dialog>
+  <dialog id="log-edit-modal" class="modal-ui w-full max-w-2xl rounded-2xl border border-mindlaw-gold/30 bg-mindlaw-teal p-0 text-mindlaw-white">
+    <form method="dialog" class="border-b border-white/10 px-5 py-3">
+      <div class="flex items-center justify-between gap-2">
+        <h3 class="text-lg font-semibold">Editar lançamento</h3>
+        <button id="btn-log-edit-close" class="rounded-lg border border-white/10 px-2 py-1 text-xs">Fechar</button>
+      </div>
+    </form>
+    <div class="space-y-3 p-5">
+      <div id="log-edit-fields"></div>
+      <button id="btn-log-edit-save" type="button" class="btn-gold w-full">Salvar alterações</button>
     </div>
   </dialog>
   <script src="/script.js"></script>

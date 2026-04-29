@@ -9,6 +9,10 @@ let interactiveFilter = null;
 let clientsPage = 1;
 let clientsPageSize = 25;
 let clientsSearchTerm = "";
+let selectedSupportMonth = null;
+let logsFilterType = "";
+let logsSearchTerm = "";
+let editingLog = null;
 
 const CLIENT_STATUS_LABELS = {
   cliente: "Cliente (ativo)",
@@ -80,6 +84,10 @@ const apiService = {
   clients: (query = "") => request(`/api/clients${query}`),
   createClient: (payload) => request("/api/clients", { method: "POST", body: JSON.stringify(payload) }),
   updateClient: (id, payload) => request(`/api/clients/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  updateSale: (id, payload) => request(`/api/sales/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  updateSupport: (id, payload) => request(`/api/support/${id}`, { method: "PUT", body: JSON.stringify(payload) }),
+  deleteSale: (id) => request(`/api/sales/${id}`, { method: "DELETE" }),
+  deleteSupport: (id) => request(`/api/support/${id}`, { method: "DELETE" }),
   createSale: (payload) => request("/api/sales", { method: "POST", body: JSON.stringify(payload) }),
   createChurn: (payload) => request("/api/support/churn", { method: "POST", body: JSON.stringify(payload) }),
   createNps: (payload) => request("/api/support/nps", { method: "POST", body: JSON.stringify(payload) }),
@@ -543,9 +551,13 @@ function renderSupportCharts(supportDashboard) {
       const b = Math.round(0 + (89 - 0) * ratio);
       const bg = `rgb(${r}, ${g}, ${b})`;
       const textColor = ratio > 0.55 ? "#001A1E" : "#FFFFFF";
-      return `<div class="rounded p-2 text-center font-semibold" style="background: ${bg}; color: ${textColor};">${monthLabels[i]}<br/><span class="text-[10px]">${count}</span></div>`;
+      const activeCls = selectedSupportMonth === i ? "ring-2 ring-mindlaw-gold/80" : "";
+      return `<button type="button" data-support-month="${i}" class="rounded p-2 text-center font-semibold ${activeCls}" style="background: ${bg}; color: ${textColor};">${monthLabels[i]}<br/><span class="text-[10px]">${count}</span></button>`;
     })
     .join("");
+
+  const monthIndex = selectedSupportMonth === null ? monthCount.findIndex((n) => n > 0) : selectedSupportMonth;
+  renderSupportMonthDetails(supportDashboard, monthIndex >= 0 ? monthIndex : null);
 
   let npsDist = supportDashboard.npsDistribution || { Promotor: 0, Neutro: 0, Detrator: 0 };
   let totalNps = (npsDist.Promotor || 0) + (npsDist.Neutro || 0) + (npsDist.Detrator || 0);
@@ -602,6 +614,37 @@ function renderSupportCharts(supportDashboard) {
     }
   });
   document.getElementById("kpi-resumo-mrr").textContent = money(supportDashboard.totalMrrPerdido || 0);
+}
+
+function renderSupportMonthDetails(supportDashboard, monthIndex) {
+  const title = document.getElementById("support-month-detail-title");
+  const list = document.getElementById("support-month-detail-list");
+  if (!title || !list) return;
+  const monthLabels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+  if (monthIndex === null || monthIndex < 0) {
+    title.textContent = "Detalhes do mês";
+    list.innerHTML = `<p class="text-mindlaw-white/60">Selecione um mês para listar os churns cadastrados.</p>`;
+    return;
+  }
+  selectedSupportMonth = monthIndex;
+  const rows = (supportDashboard.churnDetailsByMonth && supportDashboard.churnDetailsByMonth[monthIndex]) || [];
+  title.textContent = `Detalhes de ${monthLabels[monthIndex]}`;
+  if (!rows.length) {
+    list.innerHTML = `<p class="text-mindlaw-white/60">Sem churns registrados neste mês.</p>`;
+    return;
+  }
+  list.innerHTML = rows
+    .map((row) => {
+      const data = row.dataChurn ? new Date(row.dataChurn).toLocaleDateString("pt-BR") : "—";
+      const plano = row.plano || "Sem plano";
+      const status = row.statusContrato || "—";
+      return `<article class="rounded-lg border border-white/10 bg-mindlaw-teal/40 p-3">
+        <p class="font-semibold">${escapeHtml(row.cliente || "—")}</p>
+        <p class="text-xs text-mindlaw-white/70">${escapeHtml(plano)} · status: ${escapeHtml(status)}</p>
+        <p class="text-xs text-mindlaw-white/70">Data: ${data} · Motivo: ${escapeHtml(row.motivoPrincipal || "Sem Motivo")} · Valor: ${money(row.valorPerdido || 0)}</p>
+      </article>`;
+    })
+    .join("");
 }
 
 function escapeHtml(text) {
@@ -678,6 +721,13 @@ function renderLogsTable(logs) {
   if (interactiveFilter?.type === "supportNps") {
     filtered = source.filter((item) => normalizeText(item.tipo) === "nps" && normalizeText(item.status).includes(interactiveFilter.value));
   }
+  if (logsFilterType) {
+    filtered = filtered.filter((item) => normalizeText(item.origem) === normalizeText(logsFilterType));
+  }
+  if (logsSearchTerm) {
+    const term = normalizeText(logsSearchTerm);
+    filtered = filtered.filter((item) => normalizeText(item.cliente).includes(term) || normalizeText(item.detalhe).includes(term));
+  }
   const statusClass = (value) => {
     const normalized = String(value || "").toLowerCase();
     if (normalized.includes("ganho")) return "status-ganho";
@@ -693,8 +743,112 @@ function renderLogsTable(logs) {
       <td class="px-6 py-4">${item.data ? new Date(item.data).toLocaleDateString("pt-BR") : "-"}</td>
       <td class="px-6 py-4"><span class="status-chip ${statusClass(item.status)}">${item.status || "-"}</span></td>
       <td class="px-6 py-4">${item.detalhe || "-"}</td>
+      <td class="px-6 py-4">
+        <div class="flex items-center gap-2">
+          <button class="rounded-lg border border-white/20 px-3 py-1 text-xs hover:border-mindlaw-gold/60" data-edit-log-id="${escapeHtml(item.id)}" data-edit-log-origem="${escapeHtml(item.origem)}">Editar</button>
+          <button class="rounded-lg border border-rose-400/40 px-3 py-1 text-xs text-rose-200 hover:border-rose-300/70" data-delete-log-id="${escapeHtml(item.id)}" data-delete-log-origem="${escapeHtml(item.origem)}">Apagar</button>
+        </div>
+      </td>
     </tr>`).join("")
-    : `<tr><td colspan="5" class="px-6 py-6 text-center text-mindlaw-white/70">Sem registros.</td></tr>`;
+    : `<tr><td colspan="6" class="px-6 py-6 text-center text-mindlaw-white/70">Sem registros.</td></tr>`;
+}
+
+function openLogEditModal(item) {
+  editingLog = item;
+  const container = document.getElementById("log-edit-fields");
+  const modal = document.getElementById("log-edit-modal");
+  if (!container || !modal || !item) return;
+  if (item.origem === "comercial") {
+    const p = item.payload || {};
+    container.innerHTML = `
+      <input id="log_edit_cliente" class="input-ui" type="text" placeholder="Cliente" value="${escapeHtml(p.cliente || "")}" />
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <input id="log_edit_data" class="input-ui" type="date" value="${p.data ? new Date(p.data).toISOString().slice(0, 10) : ""}" />
+        <input id="log_edit_valor_contrato" class="input-ui" type="number" step="0.01" value="${escapeHtml(String(p.valorContrato ?? 0))}" />
+      </div>
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <select id="log_edit_status" class="input-ui"><option value="Em Negociacao">Em Negociação</option><option value="Ganho">Ganho</option><option value="Perdido">Perdido</option></select>
+        <select id="log_edit_motivo_perda" class="input-ui"><option value="Sem Motivo">Sem Motivo</option><option value="Preco">Preço</option><option value="Falta de Funcionalidade">Falta de Funcionalidade</option><option value="Falta de Integracao">Falta de Integração</option><option value="Outros">Outros</option></select>
+      </div>
+      <input id="log_edit_competidor" class="input-ui" type="text" placeholder="Competidor" value="${escapeHtml(p.competidor || "")}" />
+      <textarea id="log_edit_detalhe" class="input-ui" rows="3" placeholder="Detalhamento">${escapeHtml(p.detalhamentoTecnico || "")}</textarea>
+    `;
+    document.getElementById("log_edit_status").value = p.status || "Em Negociacao";
+    document.getElementById("log_edit_motivo_perda").value = p.motivoPerda || "Sem Motivo";
+  } else if (item.origem === "churn") {
+    const p = item.payload || {};
+    container.innerHTML = `
+      <input id="log_edit_cliente" class="input-ui" type="text" placeholder="Cliente" value="${escapeHtml(p.cliente || "")}" />
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <input id="log_edit_data_churn" class="input-ui" type="date" value="${p.dataChurn ? new Date(p.dataChurn).toISOString().slice(0, 10) : ""}" />
+        <input id="log_edit_valor_perdido" class="input-ui" type="number" step="0.01" value="${escapeHtml(String(p.valorPerdido ?? 0))}" />
+      </div>
+      <select id="log_edit_motivo_principal" class="input-ui"><option value="Sem Motivo">Sem Motivo</option><option value="Preco">Preço</option><option value="Falta de Funcionalidade">Falta de Funcionalidade</option><option value="Falta de Integracao">Falta de Integração</option><option value="Atendimento">Atendimento</option><option value="Outros">Outros</option></select>
+    `;
+    document.getElementById("log_edit_motivo_principal").value = p.motivoPrincipal || "Sem Motivo";
+  } else {
+    const p = item.payload || {};
+    container.innerHTML = `
+      <input id="log_edit_cliente" class="input-ui" type="text" placeholder="Cliente" value="${escapeHtml(p.cliente || "")}" />
+      <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <input id="log_edit_data_nps" class="input-ui" type="date" value="${p.dataNPS ? new Date(p.dataNPS).toISOString().slice(0, 10) : ""}" />
+        <input id="log_edit_nota_nps" class="input-ui" type="number" min="0" max="10" value="${escapeHtml(String(p.notaNPS ?? ""))}" />
+      </div>
+      <textarea id="log_edit_comentario_nps" class="input-ui" rows="3" placeholder="Comentário">${escapeHtml(p.comentarioNPS || "")}</textarea>
+    `;
+  }
+  modal.showModal();
+}
+
+async function saveLogEdit() {
+  if (!editingLog?.id || !editingLog?.origem) throw new Error("Registro inválido para edição.");
+  if (editingLog.origem === "comercial") {
+    await apiService.updateSale(editingLog.id, {
+      cliente: document.getElementById("log_edit_cliente").value.trim(),
+      data: document.getElementById("log_edit_data").value || null,
+      valorContrato: Number(document.getElementById("log_edit_valor_contrato").value || 0),
+      status: document.getElementById("log_edit_status").value,
+      motivoPerda: document.getElementById("log_edit_motivo_perda").value,
+      competidor: document.getElementById("log_edit_competidor").value.trim(),
+      detalhamentoTecnico: document.getElementById("log_edit_detalhe").value.trim()
+    });
+  } else if (editingLog.origem === "churn") {
+    await apiService.updateSupport(editingLog.id, {
+      registerType: "churn",
+      cliente: document.getElementById("log_edit_cliente").value.trim(),
+      dataChurn: document.getElementById("log_edit_data_churn").value || null,
+      valorPerdido: Number(document.getElementById("log_edit_valor_perdido").value || 0),
+      motivoPrincipal: document.getElementById("log_edit_motivo_principal").value
+    });
+  } else if (editingLog.origem === "nps") {
+    await apiService.updateSupport(editingLog.id, {
+      registerType: "nps",
+      cliente: document.getElementById("log_edit_cliente").value.trim(),
+      dataNPS: document.getElementById("log_edit_data_nps").value || null,
+      notaNPS: document.getElementById("log_edit_nota_nps").value,
+      comentarioNPS: document.getElementById("log_edit_comentario_nps").value.trim()
+    });
+  } else {
+    throw new Error("Origem do registro não reconhecida.");
+  }
+  document.getElementById("log-edit-modal")?.close();
+  toast("Lançamento atualizado.");
+  await carregarTudo();
+}
+
+async function deleteLogRecord(item) {
+  if (!item?.id || !item?.origem) throw new Error("Registro inválido para exclusão.");
+  const confirmed = window.confirm("Tem certeza que deseja apagar este lançamento? Esta ação não pode ser desfeita.");
+  if (!confirmed) return;
+  if (item.origem === "comercial") {
+    await apiService.deleteSale(item.id);
+  } else if (item.origem === "churn" || item.origem === "nps") {
+    await apiService.deleteSupport(item.id);
+  } else {
+    throw new Error("Origem do registro não reconhecida.");
+  }
+  toast("Lançamento apagado.");
+  await carregarTudo();
 }
 
 function renderClients(clients) {
@@ -959,7 +1113,9 @@ function collectFilters() {
     clientSegment: document.getElementById("filter-client-segment")?.value || "",
     sortBy: document.getElementById("filter-client-sort-by")?.value || "cadastro",
     sortDir: document.getElementById("filter-client-sort-dir")?.value || "desc",
-    churnYear: document.getElementById("support-heatmap-year")?.value || String(currentFilters.churnYear || new Date().getFullYear())
+    churnYear: document.getElementById("support-heatmap-year")?.value || String(currentFilters.churnYear || new Date().getFullYear()),
+    logsFilterType: document.getElementById("filter-logs-type")?.value || logsFilterType || "",
+    logsSearchTerm: document.getElementById("filter-logs-search")?.value || logsSearchTerm || ""
   };
 }
 
@@ -1021,6 +1177,12 @@ function restoreFilters() {
     clientsSearchTerm = searchInput.value;
   }
   currentFilters.churnYear = parsed.churnYear || String(new Date().getFullYear());
+  logsFilterType = parsed.logsFilterType || "";
+  logsSearchTerm = parsed.logsSearchTerm || "";
+  const logsTypeSel = document.getElementById("filter-logs-type");
+  if (logsTypeSel) logsTypeSel.value = logsFilterType;
+  const logsSearchInput = document.getElementById("filter-logs-search");
+  if (logsSearchInput) logsSearchInput.value = logsSearchTerm;
   const pageSizeSel = document.getElementById("clients-page-size");
   if (pageSizeSel) {
     pageSizeSel.value = parsed.clientsPageSize || "25";
@@ -1034,7 +1196,9 @@ function restoreFilters() {
     sortBy: parsed.sortBy || "cadastro",
     sortDir: parsed.sortDir || "desc",
     clientSearch: parsed.clientSearch || "",
-    churnYear: parsed.churnYear || String(new Date().getFullYear())
+    churnYear: parsed.churnYear || String(new Date().getFullYear()),
+    logsFilterType: parsed.logsFilterType || "",
+    logsSearchTerm: parsed.logsSearchTerm || ""
   };
   syncSectionPeriodInputs();
 }
@@ -1222,6 +1386,7 @@ function bindEvents() {
     renderClients(Array.isArray(currentClientRawList) ? currentClientRawList : []);
   });
   document.getElementById("support-heatmap-year")?.addEventListener("change", async (event) => {
+    selectedSupportMonth = null;
     currentFilters = { ...currentFilters, churnYear: event.target.value || String(new Date().getFullYear()) };
     localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
     try {
@@ -1245,6 +1410,72 @@ function bindEvents() {
   document.getElementById("clients-next-page")?.addEventListener("click", () => {
     clientsPage += 1;
     renderClients(currentClientList);
+  });
+  document.getElementById("filter-logs-type")?.addEventListener("change", (event) => {
+    logsFilterType = event.target.value || "";
+    currentFilters = { ...currentFilters, logsFilterType };
+    localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+    renderLogsTable(rawLogsCache);
+  });
+  document.getElementById("filter-logs-search")?.addEventListener("input", (event) => {
+    logsSearchTerm = event.target.value || "";
+    currentFilters = { ...currentFilters, logsSearchTerm };
+    localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+    renderLogsTable(rawLogsCache);
+  });
+  document.getElementById("btn-clear-logs-filters")?.addEventListener("click", () => {
+    logsFilterType = "";
+    logsSearchTerm = "";
+    const logsTypeSel = document.getElementById("filter-logs-type");
+    if (logsTypeSel) logsTypeSel.value = "";
+    const logsSearchInput = document.getElementById("filter-logs-search");
+    if (logsSearchInput) logsSearchInput.value = "";
+    currentFilters = { ...currentFilters, logsFilterType: "", logsSearchTerm: "" };
+    localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+    renderLogsTable(rawLogsCache);
+  });
+  document.getElementById("logs-table")?.addEventListener("click", async (event) => {
+    const editBtn = event.target.closest("[data-edit-log-id]");
+    if (editBtn) {
+      const origem = editBtn.getAttribute("data-edit-log-origem") || "";
+      const id = editBtn.getAttribute("data-edit-log-id") || "";
+      const record = rawLogsCache.find((r) => String(r.origem) === origem && String(r.id) === id);
+      if (record) openLogEditModal(record);
+      return;
+    }
+    const deleteBtn = event.target.closest("[data-delete-log-id]");
+    if (!deleteBtn) return;
+    const origem = deleteBtn.getAttribute("data-delete-log-origem") || "";
+    const id = deleteBtn.getAttribute("data-delete-log-id") || "";
+    const record = rawLogsCache.find((r) => String(r.origem) === origem && String(r.id) === id);
+    if (!record) return;
+    try {
+      await deleteLogRecord(record);
+    } catch (error) {
+      toast(error.message || "Erro ao apagar lançamento.");
+    }
+  });
+  document.getElementById("btn-log-edit-close")?.addEventListener("click", () => {
+    document.getElementById("log-edit-modal")?.close();
+  });
+  document.getElementById("btn-log-edit-save")?.addEventListener("click", async (event) => {
+    event.preventDefault();
+    try {
+      await saveLogEdit();
+    } catch (error) {
+      toast(error.message || "Erro ao atualizar lançamento.");
+    }
+  });
+  document.getElementById("heatmap")?.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-support-month]");
+    if (!trigger) return;
+    const idx = Number(trigger.getAttribute("data-support-month"));
+    if (Number.isNaN(idx)) return;
+    selectedSupportMonth = idx;
+    const supportView = document.getElementById("view-suporte");
+    if (!supportView?.classList.contains("hidden")) {
+      carregarTudo().catch((error) => toast(error.message || "Erro ao carregar detalhes do mês."));
+    }
   });
   document.getElementById("clients-list")?.addEventListener("click", (event) => {
     const trigger = event.target.closest("[data-client-edit]");

@@ -155,16 +155,16 @@ function toDateKey(value) {
 }
 
 function filterDuplicatedLostSales(sales, support) {
-  const churnSet = new Set(
+  const churnSetByClientDate = new Set(
     support
       .filter((item) => classifySupport(item) === "churn")
-      .map((item) => `${normalizeKey(item.cliente)}|${toDateKey(item.dataChurn)}|${normalizeKey(item.motivoPrincipal)}`)
+      .map((item) => `${normalizeKey(item.cliente)}|${toDateKey(item.dataChurn)}`)
   );
 
   return sales.filter((sale) => {
     if (sale.status !== "Perdido") return true;
-    const saleKey = `${normalizeKey(sale.cliente)}|${toDateKey(sale.data)}|${normalizeKey(sale.motivoPerda)}`;
-    const mirrored = churnSet.has(saleKey);
+    const saleKey = `${normalizeKey(sale.cliente)}|${toDateKey(sale.data)}`;
+    const mirrored = churnSetByClientDate.has(saleKey);
     const likelyLegacyMirror = Number(sale.valorContrato || 0) === 0;
     return !(mirrored && likelyLegacyMirror);
   });
@@ -237,6 +237,39 @@ router.post("/sales", async (req, res) => {
   }
 });
 
+router.put("/sales/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+    const payload = req.body || {};
+    const patch = {};
+    if (payload.cliente !== undefined) patch.cliente = String(payload.cliente || "").trim();
+    if (payload.valorContrato !== undefined) patch.valorContrato = Number(payload.valorContrato || 0);
+    if (payload.data !== undefined) patch.data = payload.data || null;
+    if (payload.status !== undefined) patch.status = payload.status;
+    if (payload.motivoPerda !== undefined) patch.motivoPerda = payload.motivoPerda || "Sem Motivo";
+    if (payload.detalhamentoTecnico !== undefined) patch.detalhamentoTecnico = payload.detalhamentoTecnico || "";
+    if (payload.competidor !== undefined) patch.competidor = payload.competidor || "";
+    const updated = await Sale.findByIdAndUpdate(id, { $set: patch }, { new: true, runValidators: true });
+    if (!updated) return res.status(404).json({ error: "Registro comercial não encontrado." });
+    return res.json({ status: "ok", data: updated });
+  } catch (error) {
+    return res.status(400).json({ error: "Falha ao atualizar dado comercial." });
+  }
+});
+
+router.delete("/sales/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+    const deleted = await Sale.findByIdAndDelete(id);
+    if (!deleted) return res.status(404).json({ error: "Registro comercial não encontrado." });
+    return res.json({ status: "ok" });
+  } catch (error) {
+    return res.status(400).json({ error: "Falha ao excluir dado comercial." });
+  }
+});
+
 router.get("/support", async (_req, res) => {
   try {
     const support = await Support.find().sort({ dataChurn: -1, dataNPS: -1 }).lean();
@@ -302,6 +335,57 @@ router.post("/support/nps", async (req, res) => {
     return res.status(201).json({ status: "ok", data: support });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao salvar NPS." });
+  }
+});
+
+router.put("/support/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+    const payload = req.body || {};
+    const support = await Support.findById(id);
+    if (!support) return res.status(404).json({ error: "Registro de suporte não encontrado." });
+    if (payload.registerType !== undefined) support.registerType = payload.registerType;
+    if (payload.cliente !== undefined) support.cliente = String(payload.cliente || "").trim();
+    if (payload.valorPerdido !== undefined) support.valorPerdido = Number(payload.valorPerdido || 0);
+    if (payload.dataChurn !== undefined) support.dataChurn = payload.dataChurn || null;
+    if (payload.motivoPrincipal !== undefined) support.motivoPrincipal = payload.motivoPrincipal || "Sem Motivo";
+    if (payload.notaNPS !== undefined) {
+      support.notaNPS = payload.notaNPS === "" || payload.notaNPS === null ? undefined : Number(payload.notaNPS);
+    }
+    if (payload.comentarioNPS !== undefined) support.comentarioNPS = payload.comentarioNPS || "";
+    if (payload.dataNPS !== undefined) support.dataNPS = payload.dataNPS || null;
+    await support.save();
+    if (support.registerType === "churn") {
+      await ensureClientByName(support.cliente, { statusContrato: "cancelado" });
+    }
+    return res.json({ status: "ok", data: support });
+  } catch (error) {
+    return res.status(400).json({ error: "Falha ao atualizar dado de suporte." });
+  }
+});
+
+router.delete("/support/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+    const support = await Support.findById(id);
+    if (!support) return res.status(404).json({ error: "Registro de suporte não encontrado." });
+    const clientName = String(support.cliente || "").trim();
+    const wasChurn = classifySupport(support) === "churn";
+    await Support.findByIdAndDelete(id);
+    if (wasChurn && clientName) {
+      const remainingChurn = await Support.countDocuments({
+        registerType: "churn",
+        cliente: clientName
+      });
+      if (!remainingChurn) {
+        await ensureClientByName(clientName, { statusContrato: "cliente" });
+      }
+    }
+    return res.json({ status: "ok" });
+  } catch (error) {
+    return res.status(400).json({ error: "Falha ao excluir dado de suporte." });
   }
 });
 
@@ -470,14 +554,30 @@ router.get("/support/dashboard", async (_req, res) => {
     const npsScore = computeNpsScore(npsDocs);
 
     const churnByMonth = Array.from({ length: 12 }, () => 0);
-    supportRaw
-      .filter((item) => classifySupport(item) === "churn" && item.dataChurn)
-      .forEach((item) => {
-        const ref = getSaoPauloMonthYear(item.dataChurn);
-        if (!ref) return;
-        if (ref.year !== churnYear) return;
-        churnByMonth[ref.month - 1] += 1;
+    const churnDetailsByMonth = Array.from({ length: 12 }, () => []);
+    const churnRows = supportRaw.filter((item) => classifySupport(item) === "churn" && item.dataChurn);
+    const churnNames = [...new Set(churnRows.map((item) => String(item.cliente || "").trim()).filter(Boolean))];
+    const clientRows = await Client.find({ nome: { $in: churnNames } })
+      .select("nome plano statusContrato")
+      .lean();
+    const clientByName = new Map(clientRows.map((c) => [normalizeKey(c.nome), c]));
+
+    churnRows.forEach((item) => {
+      const ref = getSaoPauloMonthYear(item.dataChurn);
+      if (!ref) return;
+      if (ref.year !== churnYear) return;
+      const idx = ref.month - 1;
+      churnByMonth[idx] += 1;
+      const c = clientByName.get(normalizeKey(item.cliente)) || null;
+      churnDetailsByMonth[idx].push({
+        cliente: item.cliente || "",
+        dataChurn: item.dataChurn,
+        motivoPrincipal: item.motivoPrincipal || "Sem Motivo",
+        valorPerdido: Number(item.valorPerdido || 0),
+        plano: c?.plano || "",
+        statusContrato: c?.statusContrato || ""
       });
+    });
 
     const npsDistribution = {
       Promotor: npsDocs.filter((item) => item.categoriaNPS === "Promotor").length,
@@ -506,6 +606,7 @@ router.get("/support/dashboard", async (_req, res) => {
         npsScore
       },
       churnByMonth,
+      churnDetailsByMonth,
       churnYear,
       npsDistribution,
       support,
@@ -532,13 +633,26 @@ router.get("/logs", async (_req, res) => {
 
     const logs = [
       ...sales.map((item) => ({
+        id: String(item._id || ""),
+        origem: "comercial",
         tipo: "Comercial",
         cliente: item.cliente,
         data: item.data,
         status: item.status,
-        detalhe: item.motivoPerda || "-"
+        detalhe: item.motivoPerda || "-",
+        payload: {
+          cliente: item.cliente,
+          data: item.data,
+          valorContrato: item.valorContrato || 0,
+          status: item.status || "Em Negociacao",
+          motivoPerda: item.motivoPerda || "Sem Motivo",
+          detalhamentoTecnico: item.detalhamentoTecnico || "",
+          competidor: item.competidor || ""
+        }
       })),
       ...supportFiltered.map((item) => ({
+        id: String(item._id || ""),
+        origem: classifySupport(item),
         tipo: classifySupport(item) === "nps" ? "NPS" : "Churn",
         cliente: item.cliente,
         data: item.dataChurn || item.dataNPS || item.createdAt,
@@ -546,7 +660,23 @@ router.get("/logs", async (_req, res) => {
         detalhe:
           classifySupport(item) === "nps"
             ? item.comentarioNPS || "-"
-            : item.motivoPrincipal || "-"
+            : item.motivoPrincipal || "-",
+        payload:
+          classifySupport(item) === "nps"
+            ? {
+                registerType: "nps",
+                cliente: item.cliente,
+                dataNPS: item.dataNPS || null,
+                notaNPS: item.notaNPS ?? "",
+                comentarioNPS: item.comentarioNPS || ""
+              }
+            : {
+                registerType: "churn",
+                cliente: item.cliente,
+                dataChurn: item.dataChurn || null,
+                valorPerdido: item.valorPerdido || 0,
+                motivoPrincipal: item.motivoPrincipal || "Sem Motivo"
+              }
       }))
     ].sort((a, b) => new Date(b.data || 0) - new Date(a.data || 0));
 
