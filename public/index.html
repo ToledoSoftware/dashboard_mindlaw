@@ -149,7 +149,13 @@
               </div>
             </div>
           </article>
-          <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6"><h3 class="mb-4 text-lg font-semibold tracking-tight text-mindlaw-white/85">Voz do Cliente (Distribuicao NPS)</h3><div class="h-72"><canvas id="chartNps"></canvas></div></article>
+          <div class="space-y-6">
+            <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6"><h3 class="mb-4 text-lg font-semibold tracking-tight text-mindlaw-white/85">Voz do Cliente (Distribuicao NPS)</h3><div class="h-72"><canvas id="chartNps"></canvas></div></article>
+            <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6">
+              <h3 class="mb-4 text-lg font-semibold tracking-tight text-mindlaw-white/85">Distribuição dos Motivos de Cancelamento</h3>
+              <div class="h-72"><canvas id="chartChurnReasons"></canvas></div>
+            </article>
+          </div>
         </div>
       </section>
 
@@ -178,7 +184,7 @@
                 <select id="sale_motivo" class="input-ui"><option value="Sem Motivo">Sem motivo</option><option value="Preco">Preço</option><option value="Falta de Funcionalidade">Falta de funcionalidade</option><option value="Falta de Integracao">Falta de integração</option><option value="Outros">Outros</option></select>
               </div>
               <div id="sale_funcionalidade_wrap" class="hidden">
-                <textarea id="sale_funcionalidade_faltante" rows="2" placeholder="Qual funcionalidade ou integração faltou?" class="input-ui"></textarea>
+                <textarea id="sale_funcionalidade_faltante" rows="2" placeholder="Justificativa do motivo" class="input-ui"></textarea>
               </div>
               <select id="sale_plano" class="input-ui">
                 <option value="">Sem plano</option>
@@ -199,7 +205,7 @@
               </div>
               <select id="churn_motivo" class="input-ui"><option value="Sem Motivo">Sem motivo</option><option value="Preco">Preço</option><option value="Falta de Funcionalidade">Falta de funcionalidade</option><option value="Falta de Integracao">Falta de integração</option><option value="Atendimento">Atendimento</option><option value="Outros">Outros</option></select>
               <div id="churn_funcionalidade_wrap" class="hidden">
-                <textarea id="churn_funcionalidade_faltante" rows="2" placeholder="Qual funcionalidade ou integração faltou?" class="input-ui"></textarea>
+                <textarea id="churn_funcionalidade_faltante" rows="2" placeholder="Justificativa do motivo" class="input-ui"></textarea>
               </div>
             </div>
 
@@ -353,6 +359,7 @@
             <input id="filter-logs-search" type="text" placeholder="Buscar por cliente ou detalhe" class="input-ui" />
             <button id="btn-clear-logs-filters" class="rounded-xl border border-white/20 px-4 py-2 text-sm hover:border-mindlaw-gold/60">Limpar filtros de logs</button>
           </div>
+          <div id="logs-active-interactive-filter" class="mt-3 hidden"></div>
         </article>
         <article class="panel border-t-2 border-mindlaw-gold overflow-hidden">
           <div class="overflow-x-auto">

@@ -1,4 +1,4 @@
-const chartState = { loss: null, closure: null, nps: null, clientEntradas: null, clientResumo: null, clientPlanos: null, clientEtapasResumo: null };
+const chartState = { loss: null, closure: null, nps: null, churnReasons: null, clientEntradas: null, clientResumo: null, clientPlanos: null, clientEtapasResumo: null };
 let currentFilters = {};
 let currentClientList = [];
 let currentClientRawList = [];
@@ -283,17 +283,18 @@ function getClientStageBaseDate(client) {
   return client?.dataReferencia || client?.createdAt || null;
 }
 
-function isMotivoComItemFaltante(value) {
+function isMotivoComDetalhamento(value) {
   const normalized = normalizeText(value);
   return normalized === normalizeText("Falta de Funcionalidade")
-    || normalized === normalizeText("Falta de Integracao");
+    || normalized === normalizeText("Falta de Integracao")
+    || normalized === normalizeText("Outros");
 }
 
 function updateFuncionalidadeFieldVisibility(prefix) {
   const motivo = document.getElementById(`${prefix}_motivo`)?.value || "";
   const wrapper = document.getElementById(`${prefix}_funcionalidade_wrap`);
   const input = document.getElementById(`${prefix}_funcionalidade_faltante`);
-  const shouldShow = isMotivoComItemFaltante(motivo);
+  const shouldShow = isMotivoComDetalhamento(motivo);
   if (wrapper) wrapper.classList.toggle("hidden", !shouldShow);
   if (!shouldShow && input) input.value = "";
 }
@@ -425,6 +426,18 @@ function renderComercialCharts(commercial) {
       indexAxis: useBar ? "y" : "x",
       maintainAspectRatio: false,
       plugins: { legend: { labels: { color: "#FFFFFF" } } },
+      onClick: (_evt, elements) => {
+        if (!elements.length || !reasonLabels.length) return;
+        const selected = reasonLabels[elements[0].index];
+        if (!selected) return;
+        const key = normalizeText(selected);
+        interactiveFilter = interactiveFilter?.type === "commercialReason" && interactiveFilter?.value === key
+          ? null
+          : { type: "commercialReason", value: key };
+        renderLogsTable(rawLogsCache);
+        switchTab("logs");
+        toast(interactiveFilter ? `Filtro Comercial (motivo): ${selected}` : "Filtro de motivo comercial removido.");
+      },
       scales: useBar
         ? {
             x: { ticks: { color: "#FFFFFF" }, grid: { color: "rgba(255,255,255,0.1)" } },
@@ -759,6 +772,50 @@ function renderSupportCharts(supportDashboard) {
       }
     }
   });
+  const churnReasons = supportDashboard.churnReasonDistribution || {};
+  const churnReasonLabels = Object.keys(churnReasons);
+  const churnReasonValues = Object.values(churnReasons);
+  const churnReasonCanvas = document.getElementById("chartChurnReasons");
+  if (churnReasonCanvas) {
+    const churnReasonCtx = churnReasonCanvas.getContext("2d");
+    if (chartState.churnReasons) chartState.churnReasons.destroy();
+    const useBar = churnReasonLabels.length > 4;
+    chartState.churnReasons = new Chart(churnReasonCtx, {
+      type: useBar ? "bar" : "doughnut",
+      data: {
+        labels: churnReasonLabels.length ? churnReasonLabels : ["Sem dados"],
+        datasets: [{
+          data: churnReasonValues.length ? churnReasonValues : [1],
+          backgroundColor: ["#C5A059", "#E7D4AB", "#92733C", "#6E562B", "#4B3B1E"],
+          borderWidth: useBar ? 1 : 0,
+          borderRadius: useBar ? 8 : 0
+        }]
+      },
+      options: {
+        indexAxis: useBar ? "y" : "x",
+        maintainAspectRatio: false,
+        plugins: { legend: { labels: { color: "#FFFFFF" } } },
+        onClick: (_evt, elements) => {
+          if (!elements.length || !churnReasonLabels.length) return;
+          const selected = churnReasonLabels[elements[0].index];
+          if (!selected) return;
+          const key = normalizeText(selected);
+          interactiveFilter = interactiveFilter?.type === "supportChurnReason" && interactiveFilter?.value === key
+            ? null
+            : { type: "supportChurnReason", value: key };
+          renderLogsTable(rawLogsCache);
+          switchTab("logs");
+          toast(interactiveFilter ? `Filtro Suporte (motivo): ${selected}` : "Filtro de motivo de cancelamento removido.");
+        },
+        scales: useBar
+          ? {
+              x: { ticks: { color: "#FFFFFF" }, grid: { color: "rgba(255,255,255,0.1)" } },
+              y: { ticks: { color: "#FFFFFF" }, grid: { color: "rgba(255,255,255,0.1)" } }
+            }
+          : {}
+      }
+    });
+  }
   document.getElementById("kpi-resumo-mrr").textContent = money(supportDashboard.totalMrrPerdido || 0);
 }
 
@@ -789,7 +846,7 @@ function renderSupportMonthDetails(supportDashboard, monthIndex) {
         <button class="font-semibold text-left hover:text-mindlaw-gold/90 hover:underline" data-client-link="${escapeHtml(row.cliente || "")}">${escapeHtml(row.cliente || "—")}</button>
         <p class="text-xs text-mindlaw-white/70">${escapeHtml(plano)} · status: ${escapeHtml(status)}</p>
         <p class="text-xs text-mindlaw-white/70">Data: ${data} · Motivo: ${escapeHtml(row.motivoPrincipal || "Sem Motivo")} · Valor: ${money(row.valorPerdido || 0)}</p>
-        ${funcionalidade ? `<p class="text-xs text-mindlaw-white/70">Funcionalidade faltante: ${funcionalidade}</p>` : ""}
+        ${funcionalidade ? `<p class="text-xs text-mindlaw-white/70">Justificativa do motivo: ${funcionalidade}</p>` : ""}
       </article>`;
     })
     .join("");
@@ -884,6 +941,18 @@ function renderLogsTable(logs) {
   if (interactiveFilter?.type === "supportNps") {
     filtered = source.filter((item) => normalizeText(item.tipo) === "nps" && normalizeText(item.status).includes(interactiveFilter.value));
   }
+  if (interactiveFilter?.type === "commercialReason") {
+    filtered = filtered.filter((item) => {
+      if (normalizeText(item.origem) !== "comercial") return false;
+      return normalizeText(item.payload?.motivoPerda || item.detalhe || "").includes(interactiveFilter.value);
+    });
+  }
+  if (interactiveFilter?.type === "supportChurnReason") {
+    filtered = filtered.filter((item) => {
+      if (normalizeText(item.origem) !== "churn") return false;
+      return normalizeText(item.payload?.motivoPrincipal || item.detalhe || "").includes(interactiveFilter.value);
+    });
+  }
   if (logsFilterType) {
     filtered = filtered.filter((item) => normalizeText(item.origem) === normalizeText(logsFilterType));
   }
@@ -907,6 +976,36 @@ function renderLogsTable(logs) {
     if (normalized.includes("perdido") || normalized.includes("detrator") || normalized.includes("churn")) return "status-perdido";
     return "status-negociacao";
   };
+
+  const interactiveFilterEl = document.getElementById("logs-active-interactive-filter");
+  const filterLabelMap = {
+    commercialStatus: "Comercial · Status",
+    supportNps: "Suporte · NPS",
+    commercialReason: "Comercial · Motivo",
+    supportChurnReason: "Suporte · Motivo de cancelamento"
+  };
+  const filterClassMap = {
+    commercialStatus: "border-sky-300/60 bg-sky-400/10",
+    supportNps: "border-emerald-300/60 bg-emerald-400/10",
+    commercialReason: "border-amber-300/60 bg-amber-400/10",
+    supportChurnReason: "border-rose-300/60 bg-rose-400/10"
+  };
+  if (interactiveFilterEl) {
+    if (interactiveFilter?.type && interactiveFilter?.value) {
+      const label = filterLabelMap[interactiveFilter.type] || "Filtro";
+      const chipClass = filterClassMap[interactiveFilter.type] || "border-mindlaw-gold/45 bg-mindlaw-gold/10";
+      interactiveFilterEl.classList.remove("hidden");
+      interactiveFilterEl.innerHTML = `
+        <button id="btn-clear-interactive-filter" class="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs text-mindlaw-white hover:border-mindlaw-gold/75 ${chipClass}">
+          <span>${escapeHtml(label)}: <strong>${escapeHtml(interactiveFilter.value)}</strong></span>
+          <span aria-hidden="true">✕</span>
+        </button>
+      `;
+    } else {
+      interactiveFilterEl.classList.add("hidden");
+      interactiveFilterEl.innerHTML = "";
+    }
+  }
 
   const body = document.getElementById("logs-table");
   body.innerHTML = filtered.length
@@ -945,7 +1044,7 @@ function openLogEditModal(item) {
         <select id="log_edit_motivo_perda" class="input-ui"><option value="Sem Motivo">Sem Motivo</option><option value="Preco">Preço</option><option value="Falta de Funcionalidade">Falta de Funcionalidade</option><option value="Falta de Integracao">Falta de Integração</option><option value="Outros">Outros</option></select>
       </div>
       <div id="log_edit_funcionalidade_perda_wrap" class="hidden">
-        <textarea id="log_edit_funcionalidade_perda" class="input-ui" rows="2" placeholder="Qual funcionalidade ou integração faltou?">${escapeHtml(p.funcionalidadeFaltante || "")}</textarea>
+        <textarea id="log_edit_funcionalidade_perda" class="input-ui" rows="2" placeholder="Justificativa do motivo">${escapeHtml(p.funcionalidadeFaltante || "")}</textarea>
       </div>
       <select id="log_edit_plano" class="input-ui">
         <option value="">Sem plano</option>
@@ -959,7 +1058,8 @@ function openLogEditModal(item) {
     `;
     document.getElementById("log_edit_status").value = p.status || "Em Negociacao";
     document.getElementById("log_edit_motivo_perda").value = p.motivoPerda || "Sem Motivo";
-    document.getElementById("log_edit_funcionalidade_perda_wrap")?.classList.toggle("hidden", !isMotivoComItemFaltante(p.motivoPerda));
+    const showDetalhePerda = isMotivoComDetalhamento(p.motivoPerda) || !!String(p.funcionalidadeFaltante || "").trim();
+    document.getElementById("log_edit_funcionalidade_perda_wrap")?.classList.toggle("hidden", !showDetalhePerda);
     const relatedClient = currentClientRawList.find((c) => normalizeText(c?.nome) === normalizeText(p.cliente));
     document.getElementById("log_edit_plano").value = mapPlanToOption(relatedClient?.plano || "");
   } else if (item.origem === "churn") {
@@ -972,7 +1072,7 @@ function openLogEditModal(item) {
       </div>
       <select id="log_edit_motivo_principal" class="input-ui"><option value="Sem Motivo">Sem Motivo</option><option value="Preco">Preço</option><option value="Falta de Funcionalidade">Falta de Funcionalidade</option><option value="Falta de Integracao">Falta de Integração</option><option value="Atendimento">Atendimento</option><option value="Outros">Outros</option></select>
       <div id="log_edit_funcionalidade_churn_wrap" class="hidden">
-        <textarea id="log_edit_funcionalidade_churn" class="input-ui" rows="2" placeholder="Qual funcionalidade ou integração faltou?">${escapeHtml(p.funcionalidadeFaltante || "")}</textarea>
+        <textarea id="log_edit_funcionalidade_churn" class="input-ui" rows="2" placeholder="Justificativa do motivo">${escapeHtml(p.funcionalidadeFaltante || "")}</textarea>
       </div>
       <select id="log_edit_plano" class="input-ui">
         <option value="">Sem plano</option>
@@ -983,7 +1083,8 @@ function openLogEditModal(item) {
       </select>
     `;
     document.getElementById("log_edit_motivo_principal").value = p.motivoPrincipal || "Sem Motivo";
-    document.getElementById("log_edit_funcionalidade_churn_wrap")?.classList.toggle("hidden", !isMotivoComItemFaltante(p.motivoPrincipal));
+    const showDetalheChurn = isMotivoComDetalhamento(p.motivoPrincipal) || !!String(p.funcionalidadeFaltante || "").trim();
+    document.getElementById("log_edit_funcionalidade_churn_wrap")?.classList.toggle("hidden", !showDetalheChurn);
     const relatedClient = currentClientRawList.find((c) => normalizeText(c?.nome) === normalizeText(p.cliente));
     document.getElementById("log_edit_plano").value = mapPlanToOption(relatedClient?.plano || "");
   } else {
@@ -1007,14 +1108,14 @@ function openLogEditModal(item) {
     document.getElementById("log_edit_plano").value = mapPlanToOption(relatedClient?.plano || "");
   }
   document.getElementById("log_edit_motivo_perda")?.addEventListener("change", (event) => {
-    const show = isMotivoComItemFaltante(event.target.value);
+    const show = isMotivoComDetalhamento(event.target.value);
     const wrap = document.getElementById("log_edit_funcionalidade_perda_wrap");
     const field = document.getElementById("log_edit_funcionalidade_perda");
     if (wrap) wrap.classList.toggle("hidden", !show);
     if (!show && field) field.value = "";
   });
   document.getElementById("log_edit_motivo_principal")?.addEventListener("change", (event) => {
-    const show = isMotivoComItemFaltante(event.target.value);
+    const show = isMotivoComDetalhamento(event.target.value);
     const wrap = document.getElementById("log_edit_funcionalidade_churn_wrap");
     const field = document.getElementById("log_edit_funcionalidade_churn");
     if (wrap) wrap.classList.toggle("hidden", !show);
@@ -1028,8 +1129,8 @@ async function saveLogEdit() {
   if (editingLog.origem === "comercial") {
     const motivoPerda = document.getElementById("log_edit_motivo_perda").value;
     const funcionalidadeFaltante = document.getElementById("log_edit_funcionalidade_perda")?.value?.trim() || "";
-    if (isMotivoComItemFaltante(motivoPerda) && !funcionalidadeFaltante) {
-      throw new Error("Descreva qual funcionalidade ou integração faltou.");
+    if (isMotivoComDetalhamento(motivoPerda) && !funcionalidadeFaltante) {
+      throw new Error("Descreva o detalhe do motivo selecionado.");
     }
     await apiService.updateSale(editingLog.id, {
       cliente: document.getElementById("log_edit_cliente").value.trim(),
@@ -1038,6 +1139,7 @@ async function saveLogEdit() {
       status: document.getElementById("log_edit_status").value,
       plano: document.getElementById("log_edit_plano")?.value || "",
       motivoPerda,
+      justificativaMotivo: funcionalidadeFaltante,
       funcionalidadeFaltante,
       competidor: document.getElementById("log_edit_competidor").value.trim(),
       detalhamentoTecnico: document.getElementById("log_edit_detalhe").value.trim()
@@ -1045,8 +1147,8 @@ async function saveLogEdit() {
   } else if (editingLog.origem === "churn") {
     const motivoPrincipal = document.getElementById("log_edit_motivo_principal").value;
     const funcionalidadeFaltante = document.getElementById("log_edit_funcionalidade_churn")?.value?.trim() || "";
-    if (isMotivoComItemFaltante(motivoPrincipal) && !funcionalidadeFaltante) {
-      throw new Error("Descreva qual funcionalidade ou integração faltou.");
+    if (isMotivoComDetalhamento(motivoPrincipal) && !funcionalidadeFaltante) {
+      throw new Error("Descreva o detalhe do motivo selecionado.");
     }
     await apiService.updateSupport(editingLog.id, {
       registerType: "churn",
@@ -1054,6 +1156,7 @@ async function saveLogEdit() {
       dataChurn: document.getElementById("log_edit_data_churn").value || null,
       valorPerdido: Number(document.getElementById("log_edit_valor_perdido").value || 0),
       motivoPrincipal,
+      justificativaMotivo: funcionalidadeFaltante,
       funcionalidadeFaltante,
       plano: document.getElementById("log_edit_plano")?.value || ""
     });
@@ -1222,13 +1325,14 @@ async function salvarSale() {
       status: document.getElementById("sale_status").value,
       plano: document.getElementById("sale_plano")?.value || "",
       motivoPerda: document.getElementById("sale_motivo").value,
+      justificativaMotivo: document.getElementById("sale_funcionalidade_faltante")?.value?.trim() || "",
       funcionalidadeFaltante: document.getElementById("sale_funcionalidade_faltante")?.value?.trim() || "",
       detalhamentoTecnico: document.getElementById("sale_detalhe").value.trim(),
       competidor: document.getElementById("sale_competidor").value.trim()
     };
     if (!payload.cliente || !payload.data) throw new Error("Cliente e data são obrigatórios.");
-    if (isMotivoComItemFaltante(payload.motivoPerda) && !payload.funcionalidadeFaltante) {
-      throw new Error("Descreva qual funcionalidade ou integração faltou.");
+    if (isMotivoComDetalhamento(payload.motivoPerda) && !payload.funcionalidadeFaltante) {
+      throw new Error("Descreva o detalhe do motivo selecionado.");
     }
     await apiService.createSale(payload);
     clearSaleForm();
@@ -1247,11 +1351,12 @@ async function salvarChurn() {
       valorPerdido: Number(document.getElementById("churn_valor_mensal").value || 0),
       dataChurn: document.getElementById("churn_data").value || null,
       motivoPrincipal: document.getElementById("churn_motivo").value,
+      justificativaMotivo: document.getElementById("churn_funcionalidade_faltante")?.value?.trim() || "",
       funcionalidadeFaltante: document.getElementById("churn_funcionalidade_faltante")?.value?.trim() || ""
     };
     if (!payload.cliente || !payload.dataChurn) throw new Error("Cliente e data do churn são obrigatórios.");
-    if (isMotivoComItemFaltante(payload.motivoPrincipal) && !payload.funcionalidadeFaltante) {
-      throw new Error("Descreva qual funcionalidade ou integração faltou.");
+    if (isMotivoComDetalhamento(payload.motivoPrincipal) && !payload.funcionalidadeFaltante) {
+      throw new Error("Descreva o detalhe do motivo selecionado.");
     }
     await apiService.createChurn(payload);
     clearChurnForm();
@@ -1724,6 +1829,13 @@ function bindEvents() {
     currentFilters = { ...currentFilters, logsFilterType: "", logsFilterPlan: "", logsSearchTerm: "" };
     localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
     renderLogsTable(rawLogsCache);
+  });
+  document.getElementById("logs-active-interactive-filter")?.addEventListener("click", (event) => {
+    const clearBtn = event.target.closest("#btn-clear-interactive-filter");
+    if (!clearBtn) return;
+    interactiveFilter = null;
+    renderLogsTable(rawLogsCache);
+    toast("Filtro interativo removido.");
   });
   document.getElementById("logs-table")?.addEventListener("click", async (event) => {
     const editBtn = event.target.closest("[data-edit-log-id]");

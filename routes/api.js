@@ -209,6 +209,33 @@ function getSaoPauloMonthYear(value) {
   return { year, month };
 }
 
+function normalizeMotivo(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function motivoExigeJustificativa(value) {
+  const key = normalizeMotivo(value);
+  return key === "falta de funcionalidade" || key === "falta de integracao" || key === "outros";
+}
+
+function formatDetalheMotivo(motivo, justificativa) {
+  const motivoText = String(motivo || "").trim() || "Sem Motivo";
+  const justificativaText = String(justificativa || "").trim();
+  if (motivoExigeJustificativa(motivoText) && justificativaText) {
+    return `${motivoText}: ${justificativaText}`;
+  }
+  return motivoText || "-";
+}
+
+function extractJustificativa(payload = {}) {
+  return String(payload.justificativaMotivo ?? payload.funcionalidadeFaltante ?? "")
+    .trim();
+}
+
 router.get("/sales", async (_req, res) => {
   try {
     const [salesRaw, support] = await Promise.all([
@@ -225,6 +252,10 @@ router.get("/sales", async (_req, res) => {
 router.post("/sales", async (req, res) => {
   try {
     const payload = req.body || {};
+    const justificativaMotivo = extractJustificativa(payload);
+    if (motivoExigeJustificativa(payload.motivoPerda) && !justificativaMotivo) {
+      return res.status(400).json({ error: "Justificativa do motivo é obrigatória para este tipo de perda." });
+    }
     if (payload.registerType || payload.notaNPS !== undefined || payload.dataChurn) {
       return res.status(400).json({ error: "Payload inválido para Comercial. Use as rotas de Suporte para churn/NPS." });
     }
@@ -234,7 +265,7 @@ router.post("/sales", async (req, res) => {
       data: payload.data,
       status: payload.status,
       motivoPerda: payload.motivoPerda || "Sem Motivo",
-      funcionalidadeFaltante: payload.funcionalidadeFaltante || "",
+      funcionalidadeFaltante: justificativaMotivo,
       detalhamentoTecnico: payload.detalhamentoTecnico || "",
       competidor: payload.competidor || ""
     });
@@ -250,14 +281,20 @@ router.put("/sales/:id", async (req, res) => {
     const id = String(req.params.id || "").trim();
     if (!id) return res.status(400).json({ error: "ID inválido." });
     const payload = req.body || {};
+    const justificativaMotivo = extractJustificativa(payload);
     const patch = {};
     if (payload.cliente !== undefined) patch.cliente = String(payload.cliente || "").trim();
     if (payload.valorContrato !== undefined) patch.valorContrato = Number(payload.valorContrato || 0);
     if (payload.data !== undefined) patch.data = payload.data || null;
     if (payload.status !== undefined) patch.status = payload.status;
     if (payload.motivoPerda !== undefined) patch.motivoPerda = payload.motivoPerda || "Sem Motivo";
-    if (payload.funcionalidadeFaltante !== undefined) {
-      patch.funcionalidadeFaltante = String(payload.funcionalidadeFaltante || "").trim();
+    if (payload.justificativaMotivo !== undefined || payload.funcionalidadeFaltante !== undefined) {
+      patch.funcionalidadeFaltante = justificativaMotivo;
+    }
+    if (motivoExigeJustificativa(patch.motivoPerda !== undefined ? patch.motivoPerda : payload.motivoPerda) && !(
+      patch.funcionalidadeFaltante !== undefined ? patch.funcionalidadeFaltante : justificativaMotivo
+    )) {
+      return res.status(400).json({ error: "Justificativa do motivo é obrigatória para este tipo de perda." });
     }
     if (payload.detalhamentoTecnico !== undefined) patch.detalhamentoTecnico = payload.detalhamentoTecnico || "";
     if (payload.competidor !== undefined) patch.competidor = payload.competidor || "";
@@ -296,6 +333,10 @@ router.get("/support", async (_req, res) => {
 router.post("/support", async (req, res) => {
   try {
     const payload = req.body || {};
+    const justificativaMotivo = extractJustificativa(payload);
+    if (motivoExigeJustificativa(payload.motivoPrincipal) && !justificativaMotivo) {
+      return res.status(400).json({ error: "Justificativa do motivo é obrigatória para este tipo de churn." });
+    }
     const registerType = payload.registerType || (payload.notaNPS !== undefined && payload.notaNPS !== "" ? "nps" : "churn");
     const support = await Support.create({
       registerType,
@@ -303,7 +344,7 @@ router.post("/support", async (req, res) => {
       valorPerdido: Number(payload.valorPerdido || 0),
       dataChurn: payload.dataChurn || null,
       motivoPrincipal: payload.motivoPrincipal || "Sem Motivo",
-      funcionalidadeFaltante: payload.funcionalidadeFaltante || "",
+      funcionalidadeFaltante: justificativaMotivo,
       notaNPS: payload.notaNPS !== undefined && payload.notaNPS !== "" ? Number(payload.notaNPS) : undefined,
       comentarioNPS: payload.comentarioNPS || "",
       dataNPS: payload.dataNPS || null
@@ -322,13 +363,17 @@ router.post("/support", async (req, res) => {
 router.post("/support/churn", async (req, res) => {
   try {
     const payload = req.body || {};
+    const justificativaMotivo = extractJustificativa(payload);
+    if (motivoExigeJustificativa(payload.motivoPrincipal) && !justificativaMotivo) {
+      return res.status(400).json({ error: "Justificativa do motivo é obrigatória para este tipo de churn." });
+    }
     const support = await Support.create({
       registerType: "churn",
       cliente: payload.cliente,
       valorPerdido: Number(payload.valorPerdido || 0),
       dataChurn: payload.dataChurn || null,
       motivoPrincipal: payload.motivoPrincipal || "Sem Motivo",
-      funcionalidadeFaltante: payload.funcionalidadeFaltante || ""
+      funcionalidadeFaltante: justificativaMotivo
     });
     await ensureClientByName(payload.cliente, { statusContrato: "cancelado", plano: payload.plano || "" });
     return res.status(201).json({ status: "ok", data: support });
@@ -366,8 +411,11 @@ router.put("/support/:id", async (req, res) => {
     if (payload.valorPerdido !== undefined) support.valorPerdido = Number(payload.valorPerdido || 0);
     if (payload.dataChurn !== undefined) support.dataChurn = payload.dataChurn || null;
     if (payload.motivoPrincipal !== undefined) support.motivoPrincipal = payload.motivoPrincipal || "Sem Motivo";
-    if (payload.funcionalidadeFaltante !== undefined) {
-      support.funcionalidadeFaltante = String(payload.funcionalidadeFaltante || "").trim();
+    if (payload.justificativaMotivo !== undefined || payload.funcionalidadeFaltante !== undefined) {
+      support.funcionalidadeFaltante = extractJustificativa(payload);
+    }
+    if (motivoExigeJustificativa(support.motivoPrincipal) && !String(support.funcionalidadeFaltante || "").trim()) {
+      return res.status(400).json({ error: "Justificativa do motivo é obrigatória para este tipo de churn." });
     }
     if (payload.notaNPS !== undefined) {
       support.notaNPS = payload.notaNPS === "" || payload.notaNPS === null ? undefined : Number(payload.notaNPS);
@@ -595,12 +643,15 @@ router.get("/support/dashboard", async (_req, res) => {
       }
     }
 
+    const churnReasonDistribution = {};
     churnRows.forEach((item) => {
       const ref = getSaoPauloMonthYear(item.dataChurn);
       if (!ref) return;
       if (ref.year !== churnYear) return;
       const idx = ref.month - 1;
       churnByMonth[idx] += 1;
+      const reason = item.motivoPrincipal || "Sem Motivo";
+      churnReasonDistribution[reason] = (churnReasonDistribution[reason] || 0) + 1;
       const c = clientByName.get(normalizeKey(item.cliente)) || null;
       churnDetailsByMonth[idx].push({
         cliente: item.cliente || "",
@@ -612,6 +663,14 @@ router.get("/support/dashboard", async (_req, res) => {
         statusContrato: c?.statusContrato || ""
       });
     });
+    if (!Object.keys(churnReasonDistribution).length) {
+      supportRaw
+        .filter((item) => classifySupport(item) === "churn" && item.dataChurn)
+        .forEach((item) => {
+          const reason = item.motivoPrincipal || "Sem Motivo";
+          churnReasonDistribution[reason] = (churnReasonDistribution[reason] || 0) + 1;
+        });
+    }
 
     const npsDistribution = {
       Promotor: npsDocs.filter((item) => item.categoriaNPS === "Promotor").length,
@@ -642,6 +701,7 @@ router.get("/support/dashboard", async (_req, res) => {
       churnByMonth,
       churnDetailsByMonth,
       churnYear,
+      churnReasonDistribution,
       npsDistribution,
       support,
       clients,
@@ -678,10 +738,7 @@ router.get("/logs", async (_req, res) => {
         plano: clientPlanByName.get(normalizeNameKey(item.cliente)) || "",
         data: item.data,
         status: item.status,
-        detalhe:
-          (item.motivoPerda === "Falta de Funcionalidade" || item.motivoPerda === "Falta de Integracao") && item.funcionalidadeFaltante
-            ? `${item.motivoPerda}: ${item.funcionalidadeFaltante}`
-            : item.motivoPerda || "-",
+        detalhe: formatDetalheMotivo(item.motivoPerda, item.funcionalidadeFaltante),
         payload: {
           cliente: item.cliente,
           data: item.data,
@@ -704,9 +761,7 @@ router.get("/logs", async (_req, res) => {
         detalhe:
           classifySupport(item) === "nps"
             ? item.comentarioNPS || "-"
-            : (item.motivoPrincipal === "Falta de Funcionalidade" || item.motivoPrincipal === "Falta de Integracao") && item.funcionalidadeFaltante
-              ? `${item.motivoPrincipal}: ${item.funcionalidadeFaltante}`
-              : item.motivoPrincipal || "-",
+            : formatDetalheMotivo(item.motivoPrincipal, item.funcionalidadeFaltante),
         payload:
           classifySupport(item) === "nps"
             ? {
