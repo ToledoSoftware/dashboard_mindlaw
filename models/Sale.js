@@ -15,6 +15,7 @@ const saleSchema = new mongoose.Schema(
       enum: ["Preco", "Falta de Funcionalidade", "Falta de Integracao", "Sem Motivo", "Outros"],
       default: "Sem Motivo"
     },
+    funcionalidadeFaltante: { type: String, default: "", trim: true, maxlength: 500 },
     detalhamentoTecnico: { type: String, default: "", maxlength: 2000 },
     competidor: { type: String, default: "", trim: true, maxlength: 120 }
   },

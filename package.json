@@ -9,7 +9,9 @@
     "migrate:data": "node migrate-data.js",
     "import:clients": "node scripts/import-clients.js",
     "import:atividade": "node scripts/import-clientes-atividade.js",
-    "data:lista": "node scripts/gerar-arquivo-lista-clientes.js"
+    "data:lista": "node scripts/gerar-arquivo-lista-clientes.js",
+    "sync:donos": "node scripts/sync-donos-escritorios.js",
+    "sync:cancelados-churn": "node scripts/sync-cancelados-churn.js"
   },
   "engines": {
     "node": ">=18.0.0"

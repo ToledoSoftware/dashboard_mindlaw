@@ -1,4 +1,4 @@
-const chartState = { loss: null, closure: null, nps: null, clientEntradas: null, clientResumo: null, clientPlanos: null };
+const chartState = { loss: null, closure: null, nps: null, clientEntradas: null, clientResumo: null, clientPlanos: null, clientEtapasResumo: null };
 let currentFilters = {};
 let currentClientList = [];
 let currentClientRawList = [];
@@ -11,6 +11,7 @@ let clientsPageSize = 25;
 let clientsSearchTerm = "";
 let selectedSupportMonth = null;
 let logsFilterType = "";
+let logsFilterPlan = "";
 let logsSearchTerm = "";
 let editingLog = null;
 
@@ -251,6 +252,106 @@ function includesSearch(client, term) {
   return nome.includes(base) || email.includes(base) || phoneMatch;
 }
 
+function getElapsedMonthsSince(cadastroDate) {
+  if (!cadastroDate) return null;
+  const start = new Date(cadastroDate);
+  if (Number.isNaN(start.getTime())) return null;
+  const now = new Date();
+  if (now <= start) return 0;
+  let monthDiff = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  if (now.getDate() < start.getDate()) monthDiff -= 1;
+  return Math.max(0, monthDiff);
+}
+
+function getClienteEtapaMes(cadastroDate) {
+  const elapsedMonths = getElapsedMonthsSince(cadastroDate);
+  if (elapsedMonths === null) return null;
+  return elapsedMonths + 1;
+}
+
+function formatClientTenure(cadastroDate) {
+  const elapsedMonths = getElapsedMonthsSince(cadastroDate);
+  if (elapsedMonths === null) return "Mês 1";
+  if (elapsedMonths < 12) return `Mês ${elapsedMonths + 1}`;
+  const years = Math.floor(elapsedMonths / 12);
+  const months = elapsedMonths % 12;
+  if (!months) return `${years} ano${years > 1 ? "s" : ""}`;
+  return `${years} ano${years > 1 ? "s" : ""} e ${months} ${months === 1 ? "mês" : "meses"}`;
+}
+
+function getClientStageBaseDate(client) {
+  return client?.dataReferencia || client?.createdAt || null;
+}
+
+function isMotivoComItemFaltante(value) {
+  const normalized = normalizeText(value);
+  return normalized === normalizeText("Falta de Funcionalidade")
+    || normalized === normalizeText("Falta de Integracao");
+}
+
+function updateFuncionalidadeFieldVisibility(prefix) {
+  const motivo = document.getElementById(`${prefix}_motivo`)?.value || "";
+  const wrapper = document.getElementById(`${prefix}_funcionalidade_wrap`);
+  const input = document.getElementById(`${prefix}_funcionalidade_faltante`);
+  const shouldShow = isMotivoComItemFaltante(motivo);
+  if (wrapper) wrapper.classList.toggle("hidden", !shouldShow);
+  if (!shouldShow && input) input.value = "";
+}
+
+async function copyText(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch (_error) {
+    // fallback abaixo
+  }
+  const hiddenInput = document.createElement("textarea");
+  hiddenInput.value = value;
+  hiddenInput.setAttribute("readonly", "true");
+  hiddenInput.style.position = "fixed";
+  hiddenInput.style.opacity = "0";
+  document.body.appendChild(hiddenInput);
+  hiddenInput.select();
+  const copied = document.execCommand("copy");
+  hiddenInput.remove();
+  return copied;
+}
+
+async function navigateToClientByName(clientName) {
+  const nome = String(clientName || "").trim();
+  if (!nome) return;
+  const setVal = (id, value) => {
+    const el = document.getElementById(id);
+    if (el) el.value = value;
+  };
+  clientsPage = 1;
+  clientsSearchTerm = nome;
+  setVal("filter-client-segment", "");
+  setVal("filter-client-plan", "");
+  setVal("filter-client-status", "");
+  setVal("filter-client-stage", "");
+  setVal("filter-client-sort-by", "cadastro");
+  setVal("filter-client-sort-dir", "desc");
+  setVal("filter-client-search", nome);
+  currentFilters = {
+    ...currentFilters,
+    clientSegment: "",
+    clientPlan: "",
+    clientStatus: "",
+    clientStage: "",
+    sortBy: "cadastro",
+    sortDir: "desc",
+    clientSearch: nome
+  };
+  localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+  switchTab("clientes");
+  await carregarTudo();
+}
+
 function renderComercialKpis(kpis) {
   document.getElementById("kpi-ltv").textContent = money(kpis.ltvEstimado || 0);
   document.getElementById("kpi-conv").textContent = `${(kpis.taxaConversao || 0).toFixed(1)}%`;
@@ -357,6 +458,18 @@ function buildClientPlanStats(clients) {
     byPlan[key] = (byPlan[key] || 0) + 1;
   });
   return byPlan;
+}
+
+function buildClientStageStats(clients) {
+  const byStage = new Map();
+  (Array.isArray(clients) ? clients : []).forEach((client) => {
+    if (String(client?.statusContrato || "") !== "cliente") return;
+    const stage = getClienteEtapaMes(getClientStageBaseDate(client));
+    if (!stage) return;
+    const normalizedStage = stage >= 12 ? 12 : stage;
+    byStage.set(normalizedStage, (byStage.get(normalizedStage) || 0) + 1);
+  });
+  return byStage;
 }
 
 function buildGeneralClientFilters(filters = {}) {
@@ -502,6 +615,39 @@ function renderClientPlanWidget(planStats) {
   });
 }
 
+function renderClientStageWidget(stageStats) {
+  const canvas = document.getElementById("chartClientesEtapasResumo");
+  if (!canvas) return;
+  const labels = [];
+  const values = [];
+  for (let stage = 1; stage <= 12; stage += 1) {
+    labels.push(stage === 12 ? "Mês 12+" : `Mês ${stage}`);
+    values.push(stageStats.get(stage) || 0);
+  }
+  const ctx = canvas.getContext("2d");
+  if (chartState.clientEtapasResumo) chartState.clientEtapasResumo.destroy();
+  chartState.clientEtapasResumo = new Chart(ctx, {
+    type: "bar",
+    data: {
+      labels,
+      datasets: [{
+        label: "Clientes ativos",
+        data: values,
+        backgroundColor: "#c5a059",
+        borderRadius: 6
+      }]
+    },
+    options: {
+      maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: "#FFFFFF" } } },
+      scales: {
+        x: { ticks: { color: "#FFFFFF" }, grid: { color: "rgba(255,255,255,0.08)" } },
+        y: { beginAtZero: true, ticks: { color: "#FFFFFF", precision: 0 }, grid: { color: "rgba(255,255,255,0.08)" } }
+      }
+    }
+  });
+}
+
 function renderClientEntradaPanel(stats) {
   const byStatus = (stats && stats.byStatus) || {};
   const total = typeof stats?.total === "number" ? stats.total : 0;
@@ -638,10 +784,12 @@ function renderSupportMonthDetails(supportDashboard, monthIndex) {
       const data = row.dataChurn ? new Date(row.dataChurn).toLocaleDateString("pt-BR") : "—";
       const plano = row.plano || "Sem plano";
       const status = row.statusContrato || "—";
+      const funcionalidade = row.funcionalidadeFaltante ? escapeHtml(row.funcionalidadeFaltante) : "";
       return `<article class="rounded-lg border border-white/10 bg-mindlaw-teal/40 p-3">
-        <p class="font-semibold">${escapeHtml(row.cliente || "—")}</p>
+        <button class="font-semibold text-left hover:text-mindlaw-gold/90 hover:underline" data-client-link="${escapeHtml(row.cliente || "")}">${escapeHtml(row.cliente || "—")}</button>
         <p class="text-xs text-mindlaw-white/70">${escapeHtml(plano)} · status: ${escapeHtml(status)}</p>
         <p class="text-xs text-mindlaw-white/70">Data: ${data} · Motivo: ${escapeHtml(row.motivoPrincipal || "Sem Motivo")} · Valor: ${money(row.valorPerdido || 0)}</p>
+        ${funcionalidade ? `<p class="text-xs text-mindlaw-white/70">Funcionalidade faltante: ${funcionalidade}</p>` : ""}
       </article>`;
     })
     .join("");
@@ -655,8 +803,17 @@ function escapeHtml(text) {
     .replace(/"/g, "&quot;");
 }
 
+function mapPlanToOption(plano) {
+  const planNormalized = normalizeText(plano || "");
+  if (!planNormalized) return "";
+  if (planNormalized.includes("starter")) return "Starter";
+  if (planNormalized.includes("premium")) return "Premium";
+  if (planNormalized.includes("advanced")) return "Advanced";
+  return "Outros";
+}
+
 function clearSaleForm() {
-  const ids = ["sale_cliente", "sale_valor", "sale_competidor", "sale_detalhe"];
+  const ids = ["sale_cliente", "sale_valor", "sale_competidor", "sale_detalhe", "sale_funcionalidade_faltante"];
   ids.forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.value = "";
@@ -665,18 +822,22 @@ function clearSaleForm() {
   if (saleStatus) saleStatus.value = "Em Negociacao";
   const saleMotivo = document.getElementById("sale_motivo");
   if (saleMotivo) saleMotivo.value = "Sem Motivo";
+  updateFuncionalidadeFieldVisibility("sale");
   const saleData = document.getElementById("sale_data");
   if (saleData) saleData.valueAsDate = new Date();
+  const salePlano = document.getElementById("sale_plano");
+  if (salePlano) salePlano.value = "";
 }
 
 function clearChurnForm() {
-  const ids = ["churn_cliente", "churn_valor_mensal"];
+  const ids = ["churn_cliente", "churn_valor_mensal", "churn_funcionalidade_faltante"];
   ids.forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.value = "";
   });
   const churnMotivo = document.getElementById("churn_motivo");
   if (churnMotivo) churnMotivo.value = "Sem Motivo";
+  updateFuncionalidadeFieldVisibility("churn");
   const churnData = document.getElementById("churn_data");
   if (churnData) churnData.valueAsDate = new Date();
 }
@@ -710,6 +871,8 @@ function toggleFormFields(tipo) {
     if (tipo === "churn") action.textContent = "Confirmar churn";
     if (tipo === "nps") action.textContent = "Salvar feedback NPS";
   }
+  updateFuncionalidadeFieldVisibility("sale");
+  updateFuncionalidadeFieldVisibility("churn");
 }
 
 function renderLogsTable(logs) {
@@ -723,6 +886,16 @@ function renderLogsTable(logs) {
   }
   if (logsFilterType) {
     filtered = filtered.filter((item) => normalizeText(item.origem) === normalizeText(logsFilterType));
+  }
+  if (logsFilterPlan) {
+    filtered = filtered.filter((item) => {
+      const raw = normalizeText(item.plano || "");
+      if (logsFilterPlan === "sem_plano") return !raw;
+      if (logsFilterPlan === "outros") {
+        return raw && !raw.includes("starter") && !raw.includes("premium") && !raw.includes("advanced");
+      }
+      return raw.includes(logsFilterPlan);
+    });
   }
   if (logsSearchTerm) {
     const term = normalizeText(logsSearchTerm);
@@ -739,7 +912,8 @@ function renderLogsTable(logs) {
   body.innerHTML = filtered.length
     ? filtered.map((item) => `<tr>
       <td class="px-6 py-4">${item.tipo}</td>
-      <td class="px-6 py-4">${item.cliente || "-"}</td>
+      <td class="px-6 py-4"><button class="text-left hover:text-mindlaw-gold/90 hover:underline" data-client-link="${escapeHtml(item.cliente || "")}">${item.cliente || "-"}</button></td>
+      <td class="px-6 py-4">${item.plano || "Sem plano"}</td>
       <td class="px-6 py-4">${item.data ? new Date(item.data).toLocaleDateString("pt-BR") : "-"}</td>
       <td class="px-6 py-4"><span class="status-chip ${statusClass(item.status)}">${item.status || "-"}</span></td>
       <td class="px-6 py-4">${item.detalhe || "-"}</td>
@@ -750,7 +924,7 @@ function renderLogsTable(logs) {
         </div>
       </td>
     </tr>`).join("")
-    : `<tr><td colspan="6" class="px-6 py-6 text-center text-mindlaw-white/70">Sem registros.</td></tr>`;
+    : `<tr><td colspan="7" class="px-6 py-6 text-center text-mindlaw-white/70">Sem registros.</td></tr>`;
 }
 
 function openLogEditModal(item) {
@@ -770,11 +944,24 @@ function openLogEditModal(item) {
         <select id="log_edit_status" class="input-ui"><option value="Em Negociacao">Em Negociação</option><option value="Ganho">Ganho</option><option value="Perdido">Perdido</option></select>
         <select id="log_edit_motivo_perda" class="input-ui"><option value="Sem Motivo">Sem Motivo</option><option value="Preco">Preço</option><option value="Falta de Funcionalidade">Falta de Funcionalidade</option><option value="Falta de Integracao">Falta de Integração</option><option value="Outros">Outros</option></select>
       </div>
+      <div id="log_edit_funcionalidade_perda_wrap" class="hidden">
+        <textarea id="log_edit_funcionalidade_perda" class="input-ui" rows="2" placeholder="Qual funcionalidade ou integração faltou?">${escapeHtml(p.funcionalidadeFaltante || "")}</textarea>
+      </div>
+      <select id="log_edit_plano" class="input-ui">
+        <option value="">Sem plano</option>
+        <option value="Starter">Starter</option>
+        <option value="Premium">Premium</option>
+        <option value="Advanced">Advanced</option>
+        <option value="Outros">Outros</option>
+      </select>
       <input id="log_edit_competidor" class="input-ui" type="text" placeholder="Competidor" value="${escapeHtml(p.competidor || "")}" />
       <textarea id="log_edit_detalhe" class="input-ui" rows="3" placeholder="Detalhamento">${escapeHtml(p.detalhamentoTecnico || "")}</textarea>
     `;
     document.getElementById("log_edit_status").value = p.status || "Em Negociacao";
     document.getElementById("log_edit_motivo_perda").value = p.motivoPerda || "Sem Motivo";
+    document.getElementById("log_edit_funcionalidade_perda_wrap")?.classList.toggle("hidden", !isMotivoComItemFaltante(p.motivoPerda));
+    const relatedClient = currentClientRawList.find((c) => normalizeText(c?.nome) === normalizeText(p.cliente));
+    document.getElementById("log_edit_plano").value = mapPlanToOption(relatedClient?.plano || "");
   } else if (item.origem === "churn") {
     const p = item.payload || {};
     container.innerHTML = `
@@ -784,8 +971,21 @@ function openLogEditModal(item) {
         <input id="log_edit_valor_perdido" class="input-ui" type="number" step="0.01" value="${escapeHtml(String(p.valorPerdido ?? 0))}" />
       </div>
       <select id="log_edit_motivo_principal" class="input-ui"><option value="Sem Motivo">Sem Motivo</option><option value="Preco">Preço</option><option value="Falta de Funcionalidade">Falta de Funcionalidade</option><option value="Falta de Integracao">Falta de Integração</option><option value="Atendimento">Atendimento</option><option value="Outros">Outros</option></select>
+      <div id="log_edit_funcionalidade_churn_wrap" class="hidden">
+        <textarea id="log_edit_funcionalidade_churn" class="input-ui" rows="2" placeholder="Qual funcionalidade ou integração faltou?">${escapeHtml(p.funcionalidadeFaltante || "")}</textarea>
+      </div>
+      <select id="log_edit_plano" class="input-ui">
+        <option value="">Sem plano</option>
+        <option value="Starter">Starter</option>
+        <option value="Premium">Premium</option>
+        <option value="Advanced">Advanced</option>
+        <option value="Outros">Outros</option>
+      </select>
     `;
     document.getElementById("log_edit_motivo_principal").value = p.motivoPrincipal || "Sem Motivo";
+    document.getElementById("log_edit_funcionalidade_churn_wrap")?.classList.toggle("hidden", !isMotivoComItemFaltante(p.motivoPrincipal));
+    const relatedClient = currentClientRawList.find((c) => normalizeText(c?.nome) === normalizeText(p.cliente));
+    document.getElementById("log_edit_plano").value = mapPlanToOption(relatedClient?.plano || "");
   } else {
     const p = item.payload || {};
     container.innerHTML = `
@@ -794,31 +994,68 @@ function openLogEditModal(item) {
         <input id="log_edit_data_nps" class="input-ui" type="date" value="${p.dataNPS ? new Date(p.dataNPS).toISOString().slice(0, 10) : ""}" />
         <input id="log_edit_nota_nps" class="input-ui" type="number" min="0" max="10" value="${escapeHtml(String(p.notaNPS ?? ""))}" />
       </div>
+      <select id="log_edit_plano" class="input-ui">
+        <option value="">Sem plano</option>
+        <option value="Starter">Starter</option>
+        <option value="Premium">Premium</option>
+        <option value="Advanced">Advanced</option>
+        <option value="Outros">Outros</option>
+      </select>
       <textarea id="log_edit_comentario_nps" class="input-ui" rows="3" placeholder="Comentário">${escapeHtml(p.comentarioNPS || "")}</textarea>
     `;
+    const relatedClient = currentClientRawList.find((c) => normalizeText(c?.nome) === normalizeText(p.cliente));
+    document.getElementById("log_edit_plano").value = mapPlanToOption(relatedClient?.plano || "");
   }
+  document.getElementById("log_edit_motivo_perda")?.addEventListener("change", (event) => {
+    const show = isMotivoComItemFaltante(event.target.value);
+    const wrap = document.getElementById("log_edit_funcionalidade_perda_wrap");
+    const field = document.getElementById("log_edit_funcionalidade_perda");
+    if (wrap) wrap.classList.toggle("hidden", !show);
+    if (!show && field) field.value = "";
+  });
+  document.getElementById("log_edit_motivo_principal")?.addEventListener("change", (event) => {
+    const show = isMotivoComItemFaltante(event.target.value);
+    const wrap = document.getElementById("log_edit_funcionalidade_churn_wrap");
+    const field = document.getElementById("log_edit_funcionalidade_churn");
+    if (wrap) wrap.classList.toggle("hidden", !show);
+    if (!show && field) field.value = "";
+  });
   modal.showModal();
 }
 
 async function saveLogEdit() {
   if (!editingLog?.id || !editingLog?.origem) throw new Error("Registro inválido para edição.");
   if (editingLog.origem === "comercial") {
+    const motivoPerda = document.getElementById("log_edit_motivo_perda").value;
+    const funcionalidadeFaltante = document.getElementById("log_edit_funcionalidade_perda")?.value?.trim() || "";
+    if (isMotivoComItemFaltante(motivoPerda) && !funcionalidadeFaltante) {
+      throw new Error("Descreva qual funcionalidade ou integração faltou.");
+    }
     await apiService.updateSale(editingLog.id, {
       cliente: document.getElementById("log_edit_cliente").value.trim(),
       data: document.getElementById("log_edit_data").value || null,
       valorContrato: Number(document.getElementById("log_edit_valor_contrato").value || 0),
       status: document.getElementById("log_edit_status").value,
-      motivoPerda: document.getElementById("log_edit_motivo_perda").value,
+      plano: document.getElementById("log_edit_plano")?.value || "",
+      motivoPerda,
+      funcionalidadeFaltante,
       competidor: document.getElementById("log_edit_competidor").value.trim(),
       detalhamentoTecnico: document.getElementById("log_edit_detalhe").value.trim()
     });
   } else if (editingLog.origem === "churn") {
+    const motivoPrincipal = document.getElementById("log_edit_motivo_principal").value;
+    const funcionalidadeFaltante = document.getElementById("log_edit_funcionalidade_churn")?.value?.trim() || "";
+    if (isMotivoComItemFaltante(motivoPrincipal) && !funcionalidadeFaltante) {
+      throw new Error("Descreva qual funcionalidade ou integração faltou.");
+    }
     await apiService.updateSupport(editingLog.id, {
       registerType: "churn",
       cliente: document.getElementById("log_edit_cliente").value.trim(),
       dataChurn: document.getElementById("log_edit_data_churn").value || null,
       valorPerdido: Number(document.getElementById("log_edit_valor_perdido").value || 0),
-      motivoPrincipal: document.getElementById("log_edit_motivo_principal").value
+      motivoPrincipal,
+      funcionalidadeFaltante,
+      plano: document.getElementById("log_edit_plano")?.value || ""
     });
   } else if (editingLog.origem === "nps") {
     await apiService.updateSupport(editingLog.id, {
@@ -826,7 +1063,8 @@ async function saveLogEdit() {
       cliente: document.getElementById("log_edit_cliente").value.trim(),
       dataNPS: document.getElementById("log_edit_data_nps").value || null,
       notaNPS: document.getElementById("log_edit_nota_nps").value,
-      comentarioNPS: document.getElementById("log_edit_comentario_nps").value.trim()
+      comentarioNPS: document.getElementById("log_edit_comentario_nps").value.trim(),
+      plano: document.getElementById("log_edit_plano")?.value || ""
     });
   } else {
     throw new Error("Origem do registro não reconhecida.");
@@ -856,7 +1094,16 @@ function renderClients(clients) {
   if (!container) return;
   const list = Array.isArray(clients) ? clients : [];
   currentClientRawList = list;
-  const searched = list.filter((c) => includesSearch(c, clientsSearchTerm));
+  const stageFilter = Number(document.getElementById("filter-client-stage")?.value || 0);
+  const searched = list.filter((c) => {
+    if (!includesSearch(c, clientsSearchTerm)) return false;
+    if (!stageFilter) return true;
+    if (String(c?.statusContrato || "") !== "cliente") return false;
+    const stage = getClienteEtapaMes(getClientStageBaseDate(c));
+    if (!stage) return false;
+    if (stageFilter >= 12) return stage >= 12;
+    return stage === stageFilter;
+  });
   currentClientList = searched;
   const totalResults = searched.length;
   const pageSizeSel = document.getElementById("clients-page-size");
@@ -892,11 +1139,18 @@ function renderClients(clients) {
     ? pageList.map((c) => {
       const st = c.statusContrato || "cliente";
       const chipClass = `cli-chip cli-st-${statusKey(st)}`;
+      const phone = String(c.telefone || "").trim();
+      const phoneHtml = phone
+        ? `<button class="hover:text-mindlaw-gold/90 hover:underline" data-copy-phone="${escapeHtml(phone)}">${escapeHtml(phone)}</button>`
+        : "Sem telefone";
+      const tempoCliente = st === "cliente" ? formatClientTenure(getClientStageBaseDate(c)) : "";
+      const etapaHtml = tempoCliente ? `<p class="text-xs text-mindlaw-gold/90">Tempo na base: ${tempoCliente}</p>` : "";
       return `<article class="rounded-xl border border-white/10 bg-mindlaw-teal/40 p-3">
       <p class="font-semibold">${escapeHtml(c.nome)}</p>
       <span class="${chipClass}">${escapeHtml(CLIENT_STATUS_LABELS[st] || st)}</span>
+      ${etapaHtml}
       <p class="mt-1 text-xs text-mindlaw-white/70">${escapeHtml(c.plano || "—")} · ref. ${fmtData(c.dataReferencia)}</p>
-      <p class="text-xs text-mindlaw-white/70">${escapeHtml(c.telefone || "Sem telefone")} • ${escapeHtml(c.email || "Sem e-mail")}</p>
+      <p class="text-xs text-mindlaw-white/70">${phoneHtml} • ${escapeHtml(c.email || "Sem e-mail")}</p>
       <div class="mt-2">
         <button class="rounded-lg border border-white/15 px-2 py-1 text-xs hover:border-mindlaw-gold/50" data-client-edit="${escapeHtml(c._id || "")}">Editar</button>
       </div>
@@ -926,7 +1180,10 @@ function openClientEditModal(clientId) {
   document.getElementById("edit_client_telefone").value = target.telefone || "";
   document.getElementById("edit_client_email").value = target.email || "";
   document.getElementById("edit_client_status").value = target.statusContrato || "cliente";
-  document.getElementById("edit_client_plano").value = target.plano || "";
+  const editPlano = document.getElementById("edit_client_plano");
+  if (editPlano) {
+    editPlano.value = mapPlanToOption(target.plano);
+  }
   if (target.dataReferencia) {
     const d = new Date(target.dataReferencia);
     document.getElementById("edit_client_data_ref").value = Number.isNaN(d.getTime()) ? "" : d.toISOString().slice(0, 10);
@@ -944,7 +1201,7 @@ async function salvarEdicaoCliente() {
       telefone: document.getElementById("edit_client_telefone").value.trim(),
       email: document.getElementById("edit_client_email").value.trim(),
       statusContrato: document.getElementById("edit_client_status").value,
-      plano: document.getElementById("edit_client_plano").value.trim(),
+      plano: document.getElementById("edit_client_plano").value || "",
       dataReferencia: document.getElementById("edit_client_data_ref").value || null
     };
     await apiService.updateClient(editingClientId, payload);
@@ -963,11 +1220,16 @@ async function salvarSale() {
       valorContrato: Number(document.getElementById("sale_valor").value || 0),
       data: document.getElementById("sale_data").value,
       status: document.getElementById("sale_status").value,
+      plano: document.getElementById("sale_plano")?.value || "",
       motivoPerda: document.getElementById("sale_motivo").value,
+      funcionalidadeFaltante: document.getElementById("sale_funcionalidade_faltante")?.value?.trim() || "",
       detalhamentoTecnico: document.getElementById("sale_detalhe").value.trim(),
       competidor: document.getElementById("sale_competidor").value.trim()
     };
     if (!payload.cliente || !payload.data) throw new Error("Cliente e data são obrigatórios.");
+    if (isMotivoComItemFaltante(payload.motivoPerda) && !payload.funcionalidadeFaltante) {
+      throw new Error("Descreva qual funcionalidade ou integração faltou.");
+    }
     await apiService.createSale(payload);
     clearSaleForm();
     toast("Registro comercial salvo.");
@@ -984,9 +1246,13 @@ async function salvarChurn() {
       cliente: document.getElementById("churn_cliente").value.trim(),
       valorPerdido: Number(document.getElementById("churn_valor_mensal").value || 0),
       dataChurn: document.getElementById("churn_data").value || null,
-      motivoPrincipal: document.getElementById("churn_motivo").value
+      motivoPrincipal: document.getElementById("churn_motivo").value,
+      funcionalidadeFaltante: document.getElementById("churn_funcionalidade_faltante")?.value?.trim() || ""
     };
     if (!payload.cliente || !payload.dataChurn) throw new Error("Cliente e data do churn são obrigatórios.");
+    if (isMotivoComItemFaltante(payload.motivoPrincipal) && !payload.funcionalidadeFaltante) {
+      throw new Error("Descreva qual funcionalidade ou integração faltou.");
+    }
     await apiService.createChurn(payload);
     clearChurnForm();
     toast("Churn registrado.");
@@ -1097,6 +1363,7 @@ async function carregarTudo() {
   });
   const activeClients = Array.isArray(activeClientsResponse.clients) ? activeClientsResponse.clients : [];
   renderClientPlanWidget(buildClientPlanStats(activeClients));
+  renderClientStageWidget(buildClientStageStats(activeClients));
   syncSectionPeriodInputs();
 }
 
@@ -1109,12 +1376,14 @@ function collectFilters() {
     startDate: period.startDate,
     endDate: period.endDate,
     clientStatus: document.getElementById("filter-client-status")?.value || "",
+    clientStage: document.getElementById("filter-client-stage")?.value || "",
     clientPlan: document.getElementById("filter-client-plan")?.value || currentFilters.clientPlan || "",
     clientSegment: document.getElementById("filter-client-segment")?.value || "",
     sortBy: document.getElementById("filter-client-sort-by")?.value || "cadastro",
     sortDir: document.getElementById("filter-client-sort-dir")?.value || "desc",
     churnYear: document.getElementById("support-heatmap-year")?.value || String(currentFilters.churnYear || new Date().getFullYear()),
     logsFilterType: document.getElementById("filter-logs-type")?.value || logsFilterType || "",
+    logsFilterPlan: document.getElementById("filter-logs-plan")?.value || logsFilterPlan || "",
     logsSearchTerm: document.getElementById("filter-logs-search")?.value || logsSearchTerm || ""
   };
 }
@@ -1163,6 +1432,8 @@ function restoreFilters() {
   currentFilters.endDate = parsed.endDate || "";
   const stSel = document.getElementById("filter-client-status");
   if (stSel) stSel.value = parsed.clientStatus || "";
+  const stageSel = document.getElementById("filter-client-stage");
+  if (stageSel) stageSel.value = parsed.clientStage || "";
   const segmentSel = document.getElementById("filter-client-segment");
   if (segmentSel) segmentSel.value = parsed.clientSegment || "";
   const planSel = document.getElementById("filter-client-plan");
@@ -1178,9 +1449,12 @@ function restoreFilters() {
   }
   currentFilters.churnYear = parsed.churnYear || String(new Date().getFullYear());
   logsFilterType = parsed.logsFilterType || "";
+  logsFilterPlan = parsed.logsFilterPlan || "";
   logsSearchTerm = parsed.logsSearchTerm || "";
   const logsTypeSel = document.getElementById("filter-logs-type");
   if (logsTypeSel) logsTypeSel.value = logsFilterType;
+  const logsPlanSel = document.getElementById("filter-logs-plan");
+  if (logsPlanSel) logsPlanSel.value = logsFilterPlan;
   const logsSearchInput = document.getElementById("filter-logs-search");
   if (logsSearchInput) logsSearchInput.value = logsSearchTerm;
   const pageSizeSel = document.getElementById("clients-page-size");
@@ -1191,6 +1465,7 @@ function restoreFilters() {
   currentFilters = {
     ...currentFilters,
     clientStatus: parsed.clientStatus || "",
+    clientStage: parsed.clientStage || "",
     clientPlan: parsed.clientPlan || "",
     clientSegment: parsed.clientSegment || "",
     sortBy: parsed.sortBy || "cadastro",
@@ -1198,6 +1473,7 @@ function restoreFilters() {
     clientSearch: parsed.clientSearch || "",
     churnYear: parsed.churnYear || String(new Date().getFullYear()),
     logsFilterType: parsed.logsFilterType || "",
+    logsFilterPlan: parsed.logsFilterPlan || "",
     logsSearchTerm: parsed.logsSearchTerm || ""
   };
   syncSectionPeriodInputs();
@@ -1211,7 +1487,7 @@ async function salvarCliente() {
       telefone: document.getElementById("new_client_telefone").value.trim(),
       email: document.getElementById("new_client_email").value.trim(),
       statusContrato: document.getElementById("new_client_status")?.value || "cliente",
-      plano: document.getElementById("new_client_plano")?.value.trim() || "",
+      plano: document.getElementById("new_client_plano")?.value || "",
       dataReferencia: document.getElementById("new_client_data_ref")?.value || null
     };
     if (!payload.nome) throw new Error("Nome é obrigatório.");
@@ -1251,6 +1527,8 @@ function bindEvents() {
       toggleFormFields(tipo);
     });
   }
+  document.getElementById("sale_motivo")?.addEventListener("change", () => updateFuncionalidadeFieldVisibility("sale"));
+  document.getElementById("churn_motivo")?.addEventListener("change", () => updateFuncionalidadeFieldVisibility("churn"));
   document.getElementById("btn-save-registro")?.addEventListener("click", async () => {
     const tipo = document.getElementById("registro_tipo")?.value || "comercial";
     if (tipo === "comercial") return salvarSale();
@@ -1294,6 +1572,7 @@ function bindEvents() {
       ...currentFilters,
       ...period,
       clientStatus: document.getElementById("filter-client-status")?.value || currentFilters.clientStatus || "",
+      clientStage: document.getElementById("filter-client-stage")?.value || currentFilters.clientStage || "",
       clientSegment: document.getElementById("filter-client-segment")?.value || currentFilters.clientSegment || "",
       sortBy: document.getElementById("filter-client-sort-by")?.value || currentFilters.sortBy || "cadastro",
       sortDir: document.getElementById("filter-client-sort-dir")?.value || currentFilters.sortDir || "desc"
@@ -1344,6 +1623,7 @@ function bindEvents() {
     }
   };
   document.getElementById("filter-client-status")?.addEventListener("change", reloadClients);
+  document.getElementById("filter-client-stage")?.addEventListener("change", reloadClients);
   document.getElementById("filter-client-segment")?.addEventListener("change", reloadClients);
   document.getElementById("filter-client-plan")?.addEventListener("change", reloadClients);
   document.getElementById("filter-client-sort-by")?.addEventListener("change", reloadClients);
@@ -1356,6 +1636,7 @@ function bindEvents() {
     setVal("filter-client-segment", "");
     setVal("filter-client-plan", "");
     setVal("filter-client-status", "");
+    setVal("filter-client-stage", "");
     setVal("filter-client-sort-by", "cadastro");
     setVal("filter-client-sort-dir", "desc");
     setVal("filter-client-search", "");
@@ -1366,6 +1647,7 @@ function bindEvents() {
       clientSegment: "",
       clientPlan: "",
       clientStatus: "",
+      clientStage: "",
       sortBy: "cadastro",
       sortDir: "desc",
       clientSearch: ""
@@ -1417,6 +1699,12 @@ function bindEvents() {
     localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
     renderLogsTable(rawLogsCache);
   });
+  document.getElementById("filter-logs-plan")?.addEventListener("change", (event) => {
+    logsFilterPlan = event.target.value || "";
+    currentFilters = { ...currentFilters, logsFilterPlan };
+    localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+    renderLogsTable(rawLogsCache);
+  });
   document.getElementById("filter-logs-search")?.addEventListener("input", (event) => {
     logsSearchTerm = event.target.value || "";
     currentFilters = { ...currentFilters, logsSearchTerm };
@@ -1425,12 +1713,15 @@ function bindEvents() {
   });
   document.getElementById("btn-clear-logs-filters")?.addEventListener("click", () => {
     logsFilterType = "";
+    logsFilterPlan = "";
     logsSearchTerm = "";
     const logsTypeSel = document.getElementById("filter-logs-type");
     if (logsTypeSel) logsTypeSel.value = "";
+    const logsPlanSel = document.getElementById("filter-logs-plan");
+    if (logsPlanSel) logsPlanSel.value = "";
     const logsSearchInput = document.getElementById("filter-logs-search");
     if (logsSearchInput) logsSearchInput.value = "";
-    currentFilters = { ...currentFilters, logsFilterType: "", logsSearchTerm: "" };
+    currentFilters = { ...currentFilters, logsFilterType: "", logsFilterPlan: "", logsSearchTerm: "" };
     localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
     renderLogsTable(rawLogsCache);
   });
@@ -1478,9 +1769,29 @@ function bindEvents() {
     }
   });
   document.getElementById("clients-list")?.addEventListener("click", (event) => {
+    const copyPhoneBtn = event.target.closest("[data-copy-phone]");
+    if (copyPhoneBtn) {
+      const phone = copyPhoneBtn.getAttribute("data-copy-phone") || "";
+      copyText(phone)
+        .then((ok) => toast(ok ? "Telefone copiado." : "Não foi possível copiar o telefone."))
+        .catch(() => toast("Não foi possível copiar o telefone."));
+      return;
+    }
     const trigger = event.target.closest("[data-client-edit]");
     if (!trigger) return;
     openClientEditModal(trigger.getAttribute("data-client-edit"));
+  });
+  document.addEventListener("click", async (event) => {
+    const trigger = event.target.closest("[data-client-link]");
+    if (!trigger) return;
+    const clientName = trigger.getAttribute("data-client-link") || "";
+    if (!clientName) return;
+    try {
+      await navigateToClientByName(clientName);
+      toast(`Cliente localizado: ${clientName}`);
+    } catch (error) {
+      toast(error.message || "Erro ao abrir cliente.");
+    }
   });
   document.addEventListener("click", (event) => {
     const navTrigger = event.target.closest("[data-go-tab]");

@@ -19,6 +19,13 @@ const router = express.Router();
 
 router.use(authMiddleware);
 
+function normalizeNameKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
 router.get("/clients/export", async (_req, res) => {
   try {
     const clients = await listAllClientsSorted(_req.query || {});
@@ -227,10 +234,11 @@ router.post("/sales", async (req, res) => {
       data: payload.data,
       status: payload.status,
       motivoPerda: payload.motivoPerda || "Sem Motivo",
+      funcionalidadeFaltante: payload.funcionalidadeFaltante || "",
       detalhamentoTecnico: payload.detalhamentoTecnico || "",
       competidor: payload.competidor || ""
     });
-    await ensureClientByName(payload.cliente);
+    await ensureClientByName(payload.cliente, { plano: payload.plano || "" });
     return res.status(201).json({ status: "ok", data: sale });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao salvar dado comercial." });
@@ -248,10 +256,16 @@ router.put("/sales/:id", async (req, res) => {
     if (payload.data !== undefined) patch.data = payload.data || null;
     if (payload.status !== undefined) patch.status = payload.status;
     if (payload.motivoPerda !== undefined) patch.motivoPerda = payload.motivoPerda || "Sem Motivo";
+    if (payload.funcionalidadeFaltante !== undefined) {
+      patch.funcionalidadeFaltante = String(payload.funcionalidadeFaltante || "").trim();
+    }
     if (payload.detalhamentoTecnico !== undefined) patch.detalhamentoTecnico = payload.detalhamentoTecnico || "";
     if (payload.competidor !== undefined) patch.competidor = payload.competidor || "";
     const updated = await Sale.findByIdAndUpdate(id, { $set: patch }, { new: true, runValidators: true });
     if (!updated) return res.status(404).json({ error: "Registro comercial não encontrado." });
+    if (payload.plano !== undefined) {
+      await ensureClientByName(updated.cliente, { plano: payload.plano || "" });
+    }
     return res.json({ status: "ok", data: updated });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao atualizar dado comercial." });
@@ -289,14 +303,15 @@ router.post("/support", async (req, res) => {
       valorPerdido: Number(payload.valorPerdido || 0),
       dataChurn: payload.dataChurn || null,
       motivoPrincipal: payload.motivoPrincipal || "Sem Motivo",
+      funcionalidadeFaltante: payload.funcionalidadeFaltante || "",
       notaNPS: payload.notaNPS !== undefined && payload.notaNPS !== "" ? Number(payload.notaNPS) : undefined,
       comentarioNPS: payload.comentarioNPS || "",
       dataNPS: payload.dataNPS || null
     });
     if (registerType === "churn") {
-      await ensureClientByName(payload.cliente, { statusContrato: "cancelado" });
+      await ensureClientByName(payload.cliente, { statusContrato: "cancelado", plano: payload.plano || "" });
     } else {
-      await ensureClientByName(payload.cliente);
+      await ensureClientByName(payload.cliente, { plano: payload.plano || "" });
     }
     return res.status(201).json({ status: "ok", data: support });
   } catch (error) {
@@ -312,9 +327,10 @@ router.post("/support/churn", async (req, res) => {
       cliente: payload.cliente,
       valorPerdido: Number(payload.valorPerdido || 0),
       dataChurn: payload.dataChurn || null,
-      motivoPrincipal: payload.motivoPrincipal || "Sem Motivo"
+      motivoPrincipal: payload.motivoPrincipal || "Sem Motivo",
+      funcionalidadeFaltante: payload.funcionalidadeFaltante || ""
     });
-    await ensureClientByName(payload.cliente, { statusContrato: "cancelado" });
+    await ensureClientByName(payload.cliente, { statusContrato: "cancelado", plano: payload.plano || "" });
     return res.status(201).json({ status: "ok", data: support });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao salvar churn." });
@@ -331,7 +347,7 @@ router.post("/support/nps", async (req, res) => {
       comentarioNPS: payload.comentarioNPS || "",
       dataNPS: payload.dataNPS || null
     });
-    await ensureClientByName(payload.cliente);
+    await ensureClientByName(payload.cliente, { plano: payload.plano || "" });
     return res.status(201).json({ status: "ok", data: support });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao salvar NPS." });
@@ -350,6 +366,9 @@ router.put("/support/:id", async (req, res) => {
     if (payload.valorPerdido !== undefined) support.valorPerdido = Number(payload.valorPerdido || 0);
     if (payload.dataChurn !== undefined) support.dataChurn = payload.dataChurn || null;
     if (payload.motivoPrincipal !== undefined) support.motivoPrincipal = payload.motivoPrincipal || "Sem Motivo";
+    if (payload.funcionalidadeFaltante !== undefined) {
+      support.funcionalidadeFaltante = String(payload.funcionalidadeFaltante || "").trim();
+    }
     if (payload.notaNPS !== undefined) {
       support.notaNPS = payload.notaNPS === "" || payload.notaNPS === null ? undefined : Number(payload.notaNPS);
     }
@@ -357,7 +376,9 @@ router.put("/support/:id", async (req, res) => {
     if (payload.dataNPS !== undefined) support.dataNPS = payload.dataNPS || null;
     await support.save();
     if (support.registerType === "churn") {
-      await ensureClientByName(support.cliente, { statusContrato: "cancelado" });
+      await ensureClientByName(support.cliente, { statusContrato: "cancelado", plano: payload.plano || "" });
+    } else {
+      await ensureClientByName(support.cliente, { plano: payload.plano || "" });
     }
     return res.json({ status: "ok", data: support });
   } catch (error) {
@@ -560,7 +581,19 @@ router.get("/support/dashboard", async (_req, res) => {
     const clientRows = await Client.find({ nome: { $in: churnNames } })
       .select("nome plano statusContrato")
       .lean();
-    const clientByName = new Map(clientRows.map((c) => [normalizeKey(c.nome), c]));
+    const clientByName = new Map();
+    for (const c of clientRows) {
+      const key = normalizeKey(c.nome);
+      if (!key) continue;
+      const current = clientByName.get(key);
+      if (!current) {
+        clientByName.set(key, c);
+        continue;
+      }
+      if (current.statusContrato !== "cancelado" && c.statusContrato === "cancelado") {
+        clientByName.set(key, c);
+      }
+    }
 
     churnRows.forEach((item) => {
       const ref = getSaoPauloMonthYear(item.dataChurn);
@@ -573,6 +606,7 @@ router.get("/support/dashboard", async (_req, res) => {
         cliente: item.cliente || "",
         dataChurn: item.dataChurn,
         motivoPrincipal: item.motivoPrincipal || "Sem Motivo",
+        funcionalidadeFaltante: item.funcionalidadeFaltante || "",
         valorPerdido: Number(item.valorPerdido || 0),
         plano: c?.plano || "",
         statusContrato: c?.statusContrato || ""
@@ -623,10 +657,14 @@ router.get("/support/dashboard", async (_req, res) => {
 
 router.get("/logs", async (_req, res) => {
   try {
-    const [salesRaw, support] = await Promise.all([
+    const [salesRaw, support, clients] = await Promise.all([
       Sale.find().sort({ createdAt: -1 }).lean(),
-      Support.find().sort({ createdAt: -1 }).lean()
+      Support.find().sort({ createdAt: -1 }).lean(),
+      Client.find({}).select("nome plano").lean()
     ]);
+    const clientPlanByName = new Map(
+      clients.map((client) => [normalizeNameKey(client.nome), client.plano || ""])
+    );
     const range = getRangeFromQuery(_req.query);
     const sales = filterSalesByRange(filterDuplicatedLostSales(salesRaw, support), range);
     const supportFiltered = filterSupportByRange(support, range);
@@ -637,15 +675,20 @@ router.get("/logs", async (_req, res) => {
         origem: "comercial",
         tipo: "Comercial",
         cliente: item.cliente,
+        plano: clientPlanByName.get(normalizeNameKey(item.cliente)) || "",
         data: item.data,
         status: item.status,
-        detalhe: item.motivoPerda || "-",
+        detalhe:
+          (item.motivoPerda === "Falta de Funcionalidade" || item.motivoPerda === "Falta de Integracao") && item.funcionalidadeFaltante
+            ? `${item.motivoPerda}: ${item.funcionalidadeFaltante}`
+            : item.motivoPerda || "-",
         payload: {
           cliente: item.cliente,
           data: item.data,
           valorContrato: item.valorContrato || 0,
           status: item.status || "Em Negociacao",
           motivoPerda: item.motivoPerda || "Sem Motivo",
+          funcionalidadeFaltante: item.funcionalidadeFaltante || "",
           detalhamentoTecnico: item.detalhamentoTecnico || "",
           competidor: item.competidor || ""
         }
@@ -655,12 +698,15 @@ router.get("/logs", async (_req, res) => {
         origem: classifySupport(item),
         tipo: classifySupport(item) === "nps" ? "NPS" : "Churn",
         cliente: item.cliente,
+        plano: clientPlanByName.get(normalizeNameKey(item.cliente)) || "",
         data: item.dataChurn || item.dataNPS || item.createdAt,
         status: classifySupport(item) === "nps" ? item.categoriaNPS || "NPS" : "Churn",
         detalhe:
           classifySupport(item) === "nps"
             ? item.comentarioNPS || "-"
-            : item.motivoPrincipal || "-",
+            : (item.motivoPrincipal === "Falta de Funcionalidade" || item.motivoPrincipal === "Falta de Integracao") && item.funcionalidadeFaltante
+              ? `${item.motivoPrincipal}: ${item.funcionalidadeFaltante}`
+              : item.motivoPrincipal || "-",
         payload:
           classifySupport(item) === "nps"
             ? {
@@ -675,7 +721,8 @@ router.get("/logs", async (_req, res) => {
                 cliente: item.cliente,
                 dataChurn: item.dataChurn || null,
                 valorPerdido: item.valorPerdido || 0,
-                motivoPrincipal: item.motivoPrincipal || "Sem Motivo"
+                motivoPrincipal: item.motivoPrincipal || "Sem Motivo",
+                funcionalidadeFaltante: item.funcionalidadeFaltante || ""
               }
       }))
     ].sort((a, b) => new Date(b.data || 0) - new Date(a.data || 0));

@@ -11,6 +11,7 @@ const supportSchema = new mongoose.Schema(
       enum: ["Preco", "Falta de Funcionalidade", "Falta de Integracao", "Atendimento", "Outros", "Sem Motivo"],
       default: "Sem Motivo"
     },
+    funcionalidadeFaltante: { type: String, default: "", trim: true, maxlength: 500 },
     notaNPS: { type: Number, min: 0, max: 10 },
     comentarioNPS: { type: String, maxlength: 2000, default: "" },
     dataNPS: { type: Date },
@@ -23,6 +24,7 @@ supportSchema.pre("save", function preSave(next) {
   if (this.registerType === "nps") {
     this.dataChurn = undefined;
     this.motivoPrincipal = undefined;
+    this.funcionalidadeFaltante = "";
     this.valorPerdido = 0;
     if (typeof this.notaNPS === "number") {
       if (this.notaNPS >= 9) this.categoriaNPS = "Promotor";
