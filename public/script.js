@@ -96,7 +96,7 @@ const apiService = {
 };
 
 function switchTab(tabId) {
-  ["resumo", "comercial", "suporte", "lancamentos", "clientes", "logs"].forEach((id) => {
+  ["resumo", "clientes", "comercial", "suporte", "lancamentos", "logs"].forEach((id) => {
     const view = document.getElementById(`view-${id}`);
     if (view) {
       view.classList.add("hidden");
@@ -142,7 +142,7 @@ function toggleFiltersPanel() {
 }
 
 function renderSectionPeriodFilters() {
-  const sections = ["resumo", "comercial", "suporte", "lancamentos", "clientes", "logs"];
+  const sections = ["resumo", "clientes", "comercial", "suporte", "lancamentos", "logs"];
   const monthOpts = `
     <option value="1">Jan</option><option value="2">Fev</option><option value="3">Mar</option>
     <option value="4">Abr</option><option value="5">Mai</option><option value="6">Jun</option>
@@ -186,7 +186,7 @@ function renderSectionPeriodFilters() {
 }
 
 function syncSectionPeriodInputs() {
-  const sections = ["resumo", "comercial", "suporte", "lancamentos", "clientes", "logs"];
+  const sections = ["resumo", "clientes", "comercial", "suporte", "lancamentos", "logs"];
   const fromStart = currentFilters.startDate ? new Date(`${currentFilters.startDate}T00:00:00`) : null;
   const fromEnd = currentFilters.endDate ? new Date(`${currentFilters.endDate}T00:00:00`) : null;
   const startMonth = !fromStart || Number.isNaN(fromStart.getTime()) ? Number(currentFilters.month || new Date().getMonth() + 1) : fromStart.getMonth() + 1;
@@ -1611,15 +1611,20 @@ async function salvarCliente() {
   }
 }
 
+function openNewClientModal() {
+  closeDrawer();
+  document.getElementById("new-client-modal")?.showModal();
+}
+
 function bindEvents() {
   document.getElementById("btn-menu-toggle")?.addEventListener("click", openDrawer);
   document.getElementById("btn-menu-close")?.addEventListener("click", closeDrawer);
   document.getElementById("drawer-backdrop")?.addEventListener("click", closeDrawer);
   document.getElementById("nav-resumo")?.addEventListener("click", () => switchTab("resumo"));
+  document.getElementById("nav-clientes")?.addEventListener("click", () => switchTab("clientes"));
   document.getElementById("nav-comercial")?.addEventListener("click", () => switchTab("comercial"));
   document.getElementById("nav-suporte")?.addEventListener("click", () => switchTab("suporte"));
   document.getElementById("nav-lancamentos")?.addEventListener("click", () => switchTab("lancamentos"));
-  document.getElementById("nav-clientes")?.addEventListener("click", () => switchTab("clientes"));
   document.getElementById("nav-logs")?.addEventListener("click", () => switchTab("logs"));
   const registroTipo = document.getElementById("registro_tipo");
   if (registroTipo) {
@@ -1643,9 +1648,9 @@ function bindEvents() {
   document.getElementById("btn-export")?.addEventListener("click", baixarPlanilha);
   document.getElementById("btn-export-clients")?.addEventListener("click", baixarRelatorioClientes);
   document.getElementById("btn-logout")?.addEventListener("click", logout);
-  document.getElementById("btn-open-new-client-modal")?.addEventListener("click", () => {
-    document.getElementById("new-client-modal")?.showModal();
-  });
+  document.getElementById("btn-open-new-client-modal")?.addEventListener("click", openNewClientModal);
+  document.getElementById("btn-comercial-new-client")?.addEventListener("click", openNewClientModal);
+  document.getElementById("btn-suporte-new-client")?.addEventListener("click", openNewClientModal);
   document.getElementById("btn-new-client-close")?.addEventListener("click", () => {
     document.getElementById("new-client-modal")?.close();
   });

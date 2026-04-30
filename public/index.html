@@ -55,11 +55,11 @@
       </div>
       <nav class="space-y-2">
         <button id="nav-resumo" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Visão Geral</button>
-        <button id="nav-comercial" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Dashboard Comercial</button>
-        <button id="nav-suporte" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Relatório de Suporte</button>
-        <button id="nav-lancamentos" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Centro de Lançamentos</button>
         <button id="nav-clientes" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Clientes</button>
-        <button id="nav-logs" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Logs de Dados</button>
+        <button id="nav-comercial" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Comercial</button>
+        <button id="nav-suporte" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Suporte</button>
+        <button id="nav-lancamentos" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Lançamentos</button>
+        <button id="nav-logs" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Auditoria</button>
       </nav>
       <button id="btn-export" class="mt-6 w-full rounded-xl border border-mindlaw-gold/30 bg-mindlaw-gold/10 px-4 py-3 text-xs font-bold uppercase tracking-[0.12em] hover:bg-mindlaw-gold hover:text-mindlaw-dark">Gerar Planilha</button>
       <button id="btn-logout" class="mt-3 w-full rounded-xl border border-mindlaw-gold/25 px-4 py-3 text-xs font-bold uppercase tracking-[0.12em] hover:bg-mindlaw-gold/10">Sair</button>
@@ -112,7 +112,10 @@
       </section>
 
       <section id="view-comercial" class="tab-view space-y-6">
-        <h2 class="text-center text-3xl font-extrabold tracking-tight">Dashboard Comercial</h2>
+        <div class="flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
+          <h2 class="text-center text-3xl font-extrabold tracking-tight">Comercial</h2>
+          <button type="button" id="btn-comercial-new-client" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-mindlaw-gold/40 bg-mindlaw-gold/10 text-xl font-bold text-mindlaw-gold hover:bg-mindlaw-gold hover:text-mindlaw-dark" title="Cadastrar cliente" aria-label="Cadastrar cliente">+</button>
+        </div>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
           <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">LTV Estimado</p><p id="kpi-ltv" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">R$ 0</p></article>
           <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">Taxa de Conversão</p><p id="kpi-conv" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">0%</p></article>
@@ -124,7 +127,10 @@
       </section>
 
       <section id="view-suporte" class="tab-view hidden space-y-6">
-        <h2 class="text-center text-3xl font-extrabold tracking-tight">Dashboard de Suporte</h2>
+        <div class="flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
+          <h2 class="text-center text-3xl font-extrabold tracking-tight">Suporte</h2>
+          <button type="button" id="btn-suporte-new-client" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-mindlaw-gold/40 bg-mindlaw-gold/10 text-xl font-bold text-mindlaw-gold hover:bg-mindlaw-gold hover:text-mindlaw-dark" title="Cadastrar cliente" aria-label="Cadastrar cliente">+</button>
+        </div>
         <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
           <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">Saúde da Carteira (Churn)</p><p id="kpi-churn" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p></article>
           <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">Voz do Cliente (NPS Score)</p><p id="kpi-nps" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p></article>
@@ -160,7 +166,7 @@
       </section>
 
       <section id="view-lancamentos" class="tab-view hidden space-y-6">
-        <h2 class="text-center text-3xl font-extrabold tracking-tight">Centro de Lançamentos</h2>
+        <h2 class="text-center text-3xl font-extrabold tracking-tight">Lançamentos</h2>
         <div class="mx-auto w-full max-w-2xl">
           <article class="panel launch-panel border-t-2 border-mindlaw-gold p-6 space-y-4">
             <h3 class="text-lg font-semibold">Lançamento Único</h3>
@@ -339,7 +345,7 @@
       </section>
 
       <section id="view-logs" class="tab-view hidden space-y-6">
-        <h2 class="text-center text-3xl font-extrabold tracking-tight">Logs de Dados</h2>
+        <h2 class="text-center text-3xl font-extrabold tracking-tight">Auditoria</h2>
         <article class="panel border-t-2 border-mindlaw-gold p-4">
           <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
             <select id="filter-logs-type" class="input-ui">
@@ -357,7 +363,7 @@
               <option value="sem_plano">Sem plano</option>
             </select>
             <input id="filter-logs-search" type="text" placeholder="Buscar por cliente ou detalhe" class="input-ui" />
-            <button id="btn-clear-logs-filters" class="rounded-xl border border-white/20 px-4 py-2 text-sm hover:border-mindlaw-gold/60">Limpar filtros de logs</button>
+            <button id="btn-clear-logs-filters" class="rounded-xl border border-white/20 px-4 py-2 text-sm hover:border-mindlaw-gold/60">Limpar filtros da auditoria</button>
           </div>
           <div id="logs-active-interactive-filter" class="mt-3 hidden"></div>
         </article>
@@ -459,7 +465,7 @@
     <div class="space-y-3 p-5">
       <p class="text-sm text-mindlaw-white/85">Deseja criar um lançamento comercial agora para este cliente?</p>
       <div class="flex flex-wrap gap-2">
-        <button id="btn-post-client-open-launch" type="button" class="btn-gold !px-4 !py-2">Ir para Centro de Lançamentos</button>
+        <button id="btn-post-client-open-launch" type="button" class="btn-gold !px-4 !py-2">Ir para Lançamentos</button>
         <button id="btn-post-client-later" type="button" class="rounded-lg border border-white/20 px-4 py-2 text-sm hover:border-mindlaw-gold/50">Depois</button>
       </div>
     </div>
