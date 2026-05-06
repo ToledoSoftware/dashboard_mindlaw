@@ -521,6 +521,20 @@ function applyClientPlanFilter(planKey) {
   switchTab("clientes");
 }
 
+function applyClientStageFilter(stageValue) {
+  const selected = String(stageValue || "");
+  const stageDropdown = document.getElementById("filter-client-stage");
+  if (stageDropdown) stageDropdown.value = selected;
+  clientsPage = 1;
+  currentFilters = {
+    ...currentFilters,
+    clientStage: selected
+  };
+  localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+  carregarTudo().catch((error) => toast(error.message || "Erro ao aplicar filtro de etapa."));
+  switchTab("clientes");
+}
+
 function renderClientStatusWidget({ byStatus, total, chartId, legendId, kpiId, clickableLegend = false }) {
   const kpi = document.getElementById(kpiId);
   if (kpi) kpi.textContent = String(total || 0);
@@ -633,9 +647,11 @@ function renderClientStageWidget(stageStats) {
   if (!canvas) return;
   const labels = [];
   const values = [];
+  const stageKeys = [];
   for (let stage = 1; stage <= 12; stage += 1) {
     labels.push(stage === 12 ? "Mês 12+" : `Mês ${stage}`);
     values.push(stageStats.get(stage) || 0);
+    stageKeys.push(String(stage));
   }
   const ctx = canvas.getContext("2d");
   if (chartState.clientEtapasResumo) chartState.clientEtapasResumo.destroy();
@@ -653,6 +669,13 @@ function renderClientStageWidget(stageStats) {
     options: {
       maintainAspectRatio: false,
       plugins: { legend: { labels: { color: "#FFFFFF" } } },
+      onClick: (_evt, elements) => {
+        if (!elements.length) return;
+        const idx = elements[0].index;
+        const stage = stageKeys[idx];
+        if (!stage) return;
+        applyClientStageFilter(stage);
+      },
       scales: {
         x: { ticks: { color: "#FFFFFF" }, grid: { color: "rgba(255,255,255,0.08)" } },
         y: { beginAtZero: true, ticks: { color: "#FFFFFF", precision: 0 }, grid: { color: "rgba(255,255,255,0.08)" } }
