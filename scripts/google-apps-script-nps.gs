@@ -3,8 +3,11 @@
  *
  * COMO USAR:
  * 1) No Apps Script, crie as Script Properties:
- *    - MINDLAW_API_URL = https://dashboard-mindlaw.vercel.app/api/support/nps
- *    - MINDLAW_TOKEN   = <seu bearer token>
+ *    - MINDLAW_API_URL         = https://dashboard-mindlaw.vercel.app/api/integrations/nps
+ *    - MINDLAW_INTEGRATION_KEY = mlw_live_7c4f9a2e18d3b6f0a5e9c1d7f4b8a2e6c3d9f1a7b5e8c2d4f6a9b1e3
+ *
+ *    Opcional (modo legado):
+ *    - MINDLAW_TOKEN = <seu bearer token>
  *
  * 2) Crie gatilho:
  *    - Função: onFormSubmit
@@ -90,12 +93,18 @@ function sendNpsWithFallback_(cfg, payload) {
 }
 
 function postJson_(url, token, payload) {
+  const cfg = getConfig_();
+  const headers = {};
+  if (cfg.integrationKey) {
+    headers["x-integration-key"] = cfg.integrationKey;
+  } else if (token) {
+    headers.Authorization = "Bearer " + token;
+  }
+
   const response = UrlFetchApp.fetch(url, {
     method: "post",
     contentType: "application/json",
-    headers: {
-      Authorization: "Bearer " + token
-    },
+    headers: headers,
     payload: JSON.stringify(payload),
     muteHttpExceptions: true
   });
@@ -285,13 +294,16 @@ function toIsoDate_(value) {
 
 function getConfig_() {
   const props = PropertiesService.getScriptProperties();
-  const apiUrl = String(props.getProperty("MINDLAW_API_URL") || "").trim();
+  const apiUrl = String(props.getProperty("MINDLAW_API_URL") || "https://dashboard-mindlaw.vercel.app/api/integrations/nps").trim();
   const token = String(props.getProperty("MINDLAW_TOKEN") || "").trim();
+  const integrationKey = String(props.getProperty("MINDLAW_INTEGRATION_KEY") || "").trim();
 
   if (!apiUrl) throw new Error("Propriedade MINDLAW_API_URL não configurada.");
-  if (!token) throw new Error("Propriedade MINDLAW_TOKEN não configurada.");
+  if (!integrationKey && !token) {
+    throw new Error("Configure MINDLAW_INTEGRATION_KEY (recomendado) ou MINDLAW_TOKEN.");
+  }
 
-  return { apiUrl, token };
+  return { apiUrl, token, integrationKey };
 }
 
 function buildDedupeKey_(row) {

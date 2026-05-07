@@ -31,8 +31,75 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 
+function resolveIntegrationNpsPayload(payload = {}) {
+  const cliente = String(payload.cliente || "").trim();
+  const notaRaw = payload.notaNPS ?? payload.nota;
+  const notaNPS = Number(notaRaw);
+  const comentarioNPS = String(payload.comentarioNPS ?? payload.comentario ?? "").trim();
+  const dataRaw = payload.dataNPS ?? payload.data ?? null;
+  const dataNPS = dataRaw ? new Date(dataRaw) : null;
+
+  if (!cliente) {
+    return { ok: false, error: "Cliente é obrigatório." };
+  }
+  if (!Number.isFinite(notaNPS) || notaNPS < 0 || notaNPS > 10) {
+    return { ok: false, error: "Nota NPS inválida. Use valor entre 0 e 10." };
+  }
+  if (comentarioNPS.length > 2000) {
+    return { ok: false, error: "Comentário NPS excede 2000 caracteres." };
+  }
+  if (dataRaw && Number.isNaN(dataNPS?.getTime())) {
+    return { ok: false, error: "Data NPS inválida." };
+  }
+
+  return {
+    ok: true,
+    value: {
+      cliente,
+      notaNPS,
+      comentarioNPS,
+      dataNPS: dataNPS || null
+    }
+  };
+}
+
 // Rotas de API antes do static: evita qualquer ambiguidade com arquivos em /public
 app.use("/api/auth", authRoutes);
+
+// Webhook de integração (Google Apps Script, Zapier etc.) com chave fixa.
+app.post("/api/integrations/nps", async (req, res) => {
+  try {
+    const expectedKey = String(process.env.INTEGRATION_KEY || "").trim();
+    if (!expectedKey) {
+      return res.status(503).json({ error: "INTEGRATION_KEY não configurada no servidor." });
+    }
+
+    const providedKey = String(req.headers["x-integration-key"] || req.headers["x-api-key"] || "").trim();
+    if (!providedKey || providedKey !== expectedKey) {
+      return res.status(401).json({ error: "Chave de integração inválida." });
+    }
+
+    const parsed = resolveIntegrationNpsPayload(req.body || {});
+    if (!parsed.ok) {
+      return res.status(400).json({ error: parsed.error });
+    }
+
+    const support = await Support.create({
+      registerType: "nps",
+      cliente: parsed.value.cliente,
+      notaNPS: parsed.value.notaNPS,
+      comentarioNPS: parsed.value.comentarioNPS,
+      dataNPS: parsed.value.dataNPS
+    });
+
+    await ensureClientByName(parsed.value.cliente, { plano: String(req.body?.plano || "").trim() });
+
+    return res.status(201).json({ status: "ok", data: support });
+  } catch (error) {
+    console.error("[MindLaw] integração nps:", error.message);
+    return res.status(400).json({ error: "Falha ao salvar NPS na integração." });
+  }
+});
 
 // Clientes: rotas explícitas no app (evita 404 com sub-router em path vazio em alguns ambientes)
 app.get("/api/clients", authMiddleware, async (req, res) => {
