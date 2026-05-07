@@ -145,6 +145,11 @@ function parseRow_(e) {
         return Array.isArray(arr) ? arr[0] : arr;
       }
     }
+    // fallback por similaridade de texto do cabeçalho
+    for (const key of possibleKeys) {
+      const fuzzy = getByApproxHeader_(named, key);
+      if (fuzzy !== "") return fuzzy;
+    }
     return "";
   };
 
@@ -239,6 +244,29 @@ function buildDetailedFeedback_(get) {
   return blocks.join("\n\n");
 }
 
+function normalizeHeader_(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getByApproxHeader_(namedValues, expectedHeader) {
+  const expected = normalizeHeader_(expectedHeader);
+  const allKeys = Object.keys(namedValues || {});
+  for (const realKey of allKeys) {
+    const normalizedKey = normalizeHeader_(realKey);
+    // match por inclusão para tolerar pequenas edições de enunciado no Forms
+    if (normalizedKey.includes(expected) || expected.includes(normalizedKey)) {
+      const arr = namedValues[realKey];
+      return Array.isArray(arr) ? arr[0] : arr;
+    }
+  }
+  return "";
+}
+
 function parseNpsScore_(value) {
   const raw = String(value || "").trim();
   if (!raw) return NaN;
@@ -282,4 +310,15 @@ function alreadyProcessed_(key) {
 function markProcessed_(key) {
   const props = PropertiesService.getScriptProperties();
   props.setProperty("NPS_SYNC_" + key, "1");
+}
+
+function backfillExistingResponsesForce() {
+  const props = PropertiesService.getScriptProperties();
+  const all = props.getProperties();
+  Object.keys(all)
+    .filter((k) => k.indexOf("NPS_SYNC_") === 0)
+    .forEach((k) => props.deleteProperty(k));
+
+  Logger.log("Chaves de deduplicação limpas. Reprocessando respostas...");
+  backfillExistingResponses();
 }

@@ -1336,14 +1336,35 @@ function renderClients(clients) {
 }
 
 async function refreshClientOptionsForForms() {
-  const datalist = document.getElementById("clients-options");
-  if (!datalist) return;
+  const saleSelect = document.getElementById("sale_cliente");
+  const churnSelect = document.getElementById("churn_cliente");
+  const npsSelect = document.getElementById("nps_cliente");
+  const targets = [saleSelect, churnSelect, npsSelect].filter(Boolean);
+  if (!targets.length) return;
+
+  const previousValues = new Map(targets.map((el) => [el.id, String(el.value || "")]));
   const response = await apiService.clients("?forForms=1");
   const list = Array.isArray(response.clients) ? response.clients : [];
-  datalist.innerHTML = list
+  const names = list
     .filter((c) => c && c.nome)
-    .map((c) => `<option value="${escapeHtml(c.nome)}"></option>`)
-    .join("");
+    .map((c) => String(c.nome).trim())
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "pt-BR"));
+
+  const optionsHtml = `
+    <option value="">Selecione um cliente</option>
+    ${names.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("")}
+  `;
+
+  targets.forEach((el) => {
+    const previous = previousValues.get(el.id) || "";
+    el.innerHTML = optionsHtml;
+    if (previous && names.includes(previous)) {
+      el.value = previous;
+    } else {
+      el.value = "";
+    }
+  });
 }
 
 function openClientEditModal(clientId) {
