@@ -4,7 +4,7 @@
  * COMO USAR:
  * 1) No Apps Script, crie as Script Properties:
  *    - MINDLAW_API_URL         = https://dashboard-mindlaw.vercel.app/api/integrations/nps
- *    - MINDLAW_INTEGRATION_KEY = mlw_live_7c4f9a2e18d3b6f0a5e9c1d7f4b8a2e6c3d9f1a7b5e8c2d4f6a9b1e3
+ *    - MINDLAW_INTEGRATION_KEY = <sua chave do Vercel INTEGRATION_KEY>
  *
  *    Opcional (modo legado):
  *    - MINDLAW_TOKEN = <seu bearer token>
@@ -43,7 +43,12 @@ function onFormSubmit(e) {
       notaNPS: row.notaNPS,
       comentarioNPS: row.comentarioNPS || "",
       dataNPS: row.dataNPS,
-      // aliases para compatibilidade com versões antigas de backend
+      npsMelhorarExperiencia: row.npsMelhorarExperiencia || "",
+      npsFaltouNota9: row.npsFaltouNota9 || "",
+      npsAreasMelhorar: row.npsAreasMelhorar || "",
+      npsExperienciaAteAqui: row.npsExperienciaAteAqui || "",
+      npsFuncionalidadeDiaadia: row.npsFuncionalidadeDiaadia || "",
+      npsComentarioAdicional: row.npsComentarioAdicional || "",
       nota: row.notaNPS,
       comentario: row.comentarioNPS || "",
       data: row.dataNPS
@@ -83,7 +88,13 @@ function sendNpsWithFallback_(cfg, payload) {
     cliente: payload.cliente,
     notaNPS: payload.notaNPS,
     comentarioNPS: payload.comentarioNPS || "",
-    dataNPS: payload.dataNPS || null
+    dataNPS: payload.dataNPS || null,
+    npsMelhorarExperiencia: payload.npsMelhorarExperiencia || "",
+    npsFaltouNota9: payload.npsFaltouNota9 || "",
+    npsAreasMelhorar: payload.npsAreasMelhorar || "",
+    npsExperienciaAteAqui: payload.npsExperienciaAteAqui || "",
+    npsFuncionalidadeDiaadia: payload.npsFuncionalidadeDiaadia || "",
+    npsComentarioAdicional: payload.npsComentarioAdicional || ""
   };
   const fallback = postJson_(fallbackUrl, cfg.token, fallbackPayload);
   Logger.log("Tentativa fallback: " + fallback.url + " -> " + fallback.status);
@@ -182,8 +193,7 @@ function parseRow_(e) {
     "De 0 a 10, o quanto voc� indicaria o MindLaw para outro advogado ou escrit�rio?"
   ]);
 
-  const feedbackDetalhado = buildDetailedFeedback_(get);
-
+  const feedbackDetalhado = buildStructuredNpsPayload_(get);
   const notaNPS = parseNpsScore_(notaRaw);
   if (!Number.isFinite(notaNPS)) {
     throw new Error("Nota NPS inválida: " + notaRaw);
@@ -193,7 +203,7 @@ function parseRow_(e) {
   const emailLocalPart = email.includes("@") ? email.split("@")[0] : "";
   const clienteBase = nomeRespondente || emailLocalPart || "Cliente sem identificação";
   const cliente = clienteBase.slice(0, 120);
-  const comentarioNPS = feedbackDetalhado.slice(0, 2000);
+  const comentarioNPS = feedbackDetalhado.comentarioNPS;
   const dataNPS = toIsoDate_(timestampRaw);
 
   return {
@@ -202,55 +212,93 @@ function parseRow_(e) {
     cliente,
     notaNPS: notaAjustada,
     comentarioNPS,
-    dataNPS
+    dataNPS,
+    npsMelhorarExperiencia: feedbackDetalhado.npsMelhorarExperiencia,
+    npsFaltouNota9: feedbackDetalhado.npsFaltouNota9,
+    npsAreasMelhorar: feedbackDetalhado.npsAreasMelhorar,
+    npsExperienciaAteAqui: feedbackDetalhado.npsExperienciaAteAqui,
+    npsFuncionalidadeDiaadia: feedbackDetalhado.npsFuncionalidadeDiaadia,
+    npsComentarioAdicional: feedbackDetalhado.npsComentarioAdicional
   };
 }
 
-function buildDetailedFeedback_(get) {
-  const feedbackQuestions = [
-    [
-      "O que poderíamos melhorar para tornar sua experiência melhor?",
-      "O que poder�amos melhorar para tornar sua experi�ncia melhor?"
-    ],
-    [
-      "O que faltou para sua experiência com o MindLaw ser nota 9 ou 10?",
-      "O que faltou para sua experi�ncia com o MindLaw ser nota 9 ou 10?"
-    ],
-    [
-      "Quais áreas você acredita que ainda podem melhorar?",
-      "Quais �reas voc� acredita que ainda podem melhorar?"
-    ],
-    [
-      "Como tem sido sua experiência com o MindLaw até aqui?",
-      "Como tem sido sua experi�ncia com o MindLaw at� aqui?"
-    ],
-    [
-      "Qual funcionalidade ou diferencial do MindLaw mais ajuda no seu dia a dia?",
-      "Qual funcionalidade ou diferencial do MindLaw mais ajuda no seu dia a dia?"
-    ],
-    [
-      "Gostaria de compartilhar mais algum comentário, sugestão ou experiência sobre o MindLaw?",
-      "Gostaria de compartilhar mais algum coment�rio, sugest�o ou experi�ncia sobre o MindLaw?"
-    ]
+/** Colunas alinhadas ao formulário: ramificação por nota + colunas fixas. */
+function buildStructuredNpsPayload_(get) {
+  const Q_MELHORAR = [
+    "O que poderíamos melhorar para tornar sua experiência melhor?",
+    "O que poder�amos melhorar para tornar sua experi�ncia melhor?"
+  ];
+  const Q_FALTOU = [
+    "O que faltou para sua experiência com o MindLaw ser nota 9 ou 10?",
+    "O que faltou para sua experi�ncia com o MindLaw ser nota 9 ou 10?"
+  ];
+  const Q_AREAS = [
+    "Quais áreas você acredita que ainda podem melhorar?",
+    "Quais �reas voc� acredita que ainda podem melhorar?"
+  ];
+  const Q_EXP = [
+    "Como tem sido sua experiência com o MindLaw até aqui?",
+    "Como tem sido sua experi�ncia com o MindLaw at� aqui?"
+  ];
+  const Q_FUNC = [
+    "Qual funcionalidade ou diferencial do MindLaw mais ajuda no seu dia a dia?"
+  ];
+  const Q_EXTRA = [
+    "Gostaria de compartilhar mais algum comentário, sugestão ou experiência sobre o MindLaw?",
+    "Gostaria de compartilhar mais algum coment�rio, sugest�o ou experi�ncia sobre o MindLaw?"
   ];
 
-  const blocks = [];
-  for (const keys of feedbackQuestions) {
-    const pergunta = keys[0];
-    const resposta = String(get(keys) || "").trim();
-    if (!resposta) continue;
-    blocks.push(pergunta + "\n" + resposta);
+  let npsMelhorarExperiencia = trimStr_(get(Q_MELHORAR));
+  const npsFaltouNota9 = trimStr_(get(Q_FALTOU));
+  const npsAreasMelhorar = trimStr_(get(Q_AREAS));
+  const npsExperienciaAteAqui = trimStr_(get(Q_EXP));
+  const npsFuncionalidadeDiaadia = trimStr_(get(Q_FUNC));
+  const npsComentarioAdicional = trimStr_(get(Q_EXTRA));
+
+  if (!npsMelhorarExperiencia) {
+    npsMelhorarExperiencia = trimStr_(get(["Qual foi o principal motivo da sua nota?"]));
   }
 
-  // fallback opcional para preservar contexto de respostas antigas
-  if (!blocks.length) {
-    const motivo = String(get([
-      "Qual foi o principal motivo da sua nota?"
-    ]) || "").trim();
-    if (motivo) blocks.push("Qual foi o principal motivo da sua nota?\n" + motivo);
-  }
+  const comentarioNPS = buildLegacyCombinedComentario_({
+    npsMelhorarExperiencia: npsMelhorarExperiencia,
+    npsFaltouNota9: npsFaltouNota9,
+    npsAreasMelhorar: npsAreasMelhorar,
+    npsExperienciaAteAqui: npsExperienciaAteAqui,
+    npsFuncionalidadeDiaadia: npsFuncionalidadeDiaadia,
+    npsComentarioAdicional: npsComentarioAdicional
+  });
 
-  return blocks.join("\n\n");
+  return {
+    npsMelhorarExperiencia: npsMelhorarExperiencia.slice(0, 2000),
+    npsFaltouNota9: npsFaltouNota9.slice(0, 2000),
+    npsAreasMelhorar: npsAreasMelhorar.slice(0, 2000),
+    npsExperienciaAteAqui: npsExperienciaAteAqui.slice(0, 2000),
+    npsFuncionalidadeDiaadia: npsFuncionalidadeDiaadia.slice(0, 2000),
+    npsComentarioAdicional: npsComentarioAdicional.slice(0, 2000),
+    comentarioNPS: comentarioNPS.slice(0, 2000)
+  };
+}
+
+function trimStr_(v) {
+  return String(v || "").trim();
+}
+
+function buildLegacyCombinedComentario_(cols) {
+  const blocks = [
+    ["O que poderíamos melhorar para tornar sua experiência melhor?", cols.npsMelhorarExperiencia],
+    ["O que faltou para sua experiência com o MindLaw ser nota 9 ou 10?", cols.npsFaltouNota9],
+    ["Quais áreas você acredita que ainda podem melhorar?", cols.npsAreasMelhorar],
+    ["Como tem sido sua experiência com o MindLaw até aqui?", cols.npsExperienciaAteAqui],
+    ["Qual funcionalidade ou diferencial do MindLaw mais ajuda no seu dia a dia?", cols.npsFuncionalidadeDiaadia],
+    ["Gostaria de compartilhar mais algum comentário, sugestão ou experiência sobre o MindLaw?", cols.npsComentarioAdicional]
+  ];
+  const parts = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const q = blocks[i][0];
+    const a = String(blocks[i][1] || "").trim();
+    if (a) parts.push(q + "\n" + a);
+  }
+  return parts.join("\n\n");
 }
 
 function normalizeHeader_(value) {

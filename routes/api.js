@@ -6,6 +6,7 @@ const Client = require("../models/Client");
 const { getRangeFromQuery } = require("../lib/dateRange");
 const { ensureClientByName, listAllClientsSorted, getClientEntradaStats, computeChaveUnica } = require("../services/clientSync");
 const authMiddleware = require("../middleware/authMiddleware");
+const { deriveCategoriaNps, buildNpsColumnMap } = require("../lib/npsAudit");
 
 const STATUS_LABEL_PT = {
   cliente: "Cliente (ativo)",
@@ -382,15 +383,28 @@ router.post("/support/churn", async (req, res) => {
   }
 });
 
+function extractNpsStructuredFields(payload = {}) {
+  return {
+    npsMelhorarExperiencia: String(payload.npsMelhorarExperiencia || payload.melhorarExperiencia || "").trim().slice(0, 2000),
+    npsFaltouNota9: String(payload.npsFaltouNota9 || payload.faltouNota9 || "").trim().slice(0, 2000),
+    npsAreasMelhorar: String(payload.npsAreasMelhorar || payload.areasMelhorar || "").trim().slice(0, 2000),
+    npsExperienciaAteAqui: String(payload.npsExperienciaAteAqui || payload.experienciaAteAqui || "").trim().slice(0, 2000),
+    npsFuncionalidadeDiaadia: String(payload.npsFuncionalidadeDiaadia || payload.funcionalidadeDiaadia || "").trim().slice(0, 2000),
+    npsComentarioAdicional: String(payload.npsComentarioAdicional || payload.comentarioAdicional || "").trim().slice(0, 2000)
+  };
+}
+
 router.post("/support/nps", async (req, res) => {
   try {
     const payload = req.body || {};
+    const structured = extractNpsStructuredFields(payload);
     const support = await Support.create({
       registerType: "nps",
       cliente: payload.cliente,
       notaNPS: Number(payload.notaNPS),
-      comentarioNPS: payload.comentarioNPS || "",
-      dataNPS: payload.dataNPS || null
+      comentarioNPS: String(payload.comentarioNPS || "").slice(0, 2000),
+      dataNPS: payload.dataNPS || null,
+      ...structured
     });
     await ensureClientByName(payload.cliente, { plano: payload.plano || "" });
     return res.status(201).json({ status: "ok", data: support });
@@ -422,6 +436,28 @@ router.put("/support/:id", async (req, res) => {
     }
     if (payload.comentarioNPS !== undefined) support.comentarioNPS = payload.comentarioNPS || "";
     if (payload.dataNPS !== undefined) support.dataNPS = payload.dataNPS || null;
+    if (
+      payload.npsMelhorarExperiencia !== undefined ||
+      payload.npsFaltouNota9 !== undefined ||
+      payload.npsAreasMelhorar !== undefined ||
+      payload.npsExperienciaAteAqui !== undefined ||
+      payload.npsFuncionalidadeDiaadia !== undefined ||
+      payload.npsComentarioAdicional !== undefined ||
+      payload.melhorarExperiencia !== undefined ||
+      payload.faltouNota9 !== undefined ||
+      payload.areasMelhorar !== undefined ||
+      payload.experienciaAteAqui !== undefined ||
+      payload.funcionalidadeDiaadia !== undefined ||
+      payload.comentarioAdicional !== undefined
+    ) {
+      const s = extractNpsStructuredFields(payload);
+      support.npsMelhorarExperiencia = s.npsMelhorarExperiencia;
+      support.npsFaltouNota9 = s.npsFaltouNota9;
+      support.npsAreasMelhorar = s.npsAreasMelhorar;
+      support.npsExperienciaAteAqui = s.npsExperienciaAteAqui;
+      support.npsFuncionalidadeDiaadia = s.npsFuncionalidadeDiaadia;
+      support.npsComentarioAdicional = s.npsComentarioAdicional;
+    }
     await support.save();
     if (support.registerType === "churn") {
       await ensureClientByName(support.cliente, { statusContrato: "cancelado", plano: payload.plano || "" });
@@ -673,9 +709,9 @@ router.get("/support/dashboard", async (_req, res) => {
     }
 
     const npsDistribution = {
-      Promotor: npsDocs.filter((item) => item.categoriaNPS === "Promotor").length,
-      Neutro: npsDocs.filter((item) => item.categoriaNPS === "Neutro").length,
-      Detrator: npsDocs.filter((item) => item.categoriaNPS === "Detrator").length
+      Promotor: npsDocs.filter((item) => deriveCategoriaNps(item) === "Promotor").length,
+      Neutro: npsDocs.filter((item) => deriveCategoriaNps(item) === "Neutro").length,
+      Detrator: npsDocs.filter((item) => deriveCategoriaNps(item) === "Detrator").length
     };
 
     let clients = [];
@@ -750,26 +786,34 @@ router.get("/logs", async (_req, res) => {
           competidor: item.competidor || ""
         }
       })),
-      ...supportFiltered.map((item) => ({
-        id: String(item._id || ""),
-        origem: classifySupport(item),
-        tipo: classifySupport(item) === "nps" ? "NPS" : "Churn",
-        cliente: item.cliente,
-        plano: clientPlanByName.get(normalizeNameKey(item.cliente)) || "",
-        data: item.dataChurn || item.dataNPS || item.createdAt,
-        status: classifySupport(item) === "nps" ? item.categoriaNPS || "NPS" : "Churn",
-        detalhe:
-          classifySupport(item) === "nps"
-            ? item.comentarioNPS || "-"
-            : formatDetalheMotivo(item.motivoPrincipal, item.funcionalidadeFaltante),
-        payload:
-          classifySupport(item) === "nps"
+      ...supportFiltered.map((item) => {
+        const isNps = classifySupport(item) === "nps";
+        const cat = isNps ? deriveCategoriaNps(item) : "";
+        const npsCols = isNps ? buildNpsColumnMap(item) : null;
+        return {
+          id: String(item._id || ""),
+          origem: classifySupport(item),
+          tipo: isNps ? "NPS" : "Churn",
+          cliente: item.cliente,
+          plano: clientPlanByName.get(normalizeNameKey(item.cliente)) || "",
+          data: item.dataChurn || item.dataNPS || item.createdAt,
+          status: isNps ? cat || "NPS" : "Churn",
+          detalhe: isNps ? item.comentarioNPS || "-" : formatDetalheMotivo(item.motivoPrincipal, item.funcionalidadeFaltante),
+          npsNota: isNps ? item.notaNPS : null,
+          npsColunas: npsCols,
+          payload: isNps
             ? {
                 registerType: "nps",
                 cliente: item.cliente,
                 dataNPS: item.dataNPS || null,
                 notaNPS: item.notaNPS ?? "",
-                comentarioNPS: item.comentarioNPS || ""
+                comentarioNPS: item.comentarioNPS || "",
+                npsMelhorarExperiencia: item.npsMelhorarExperiencia || "",
+                npsFaltouNota9: item.npsFaltouNota9 || "",
+                npsAreasMelhorar: item.npsAreasMelhorar || "",
+                npsExperienciaAteAqui: item.npsExperienciaAteAqui || "",
+                npsFuncionalidadeDiaadia: item.npsFuncionalidadeDiaadia || "",
+                npsComentarioAdicional: item.npsComentarioAdicional || ""
               }
             : {
                 registerType: "churn",
@@ -779,7 +823,8 @@ router.get("/logs", async (_req, res) => {
                 motivoPrincipal: item.motivoPrincipal || "Sem Motivo",
                 funcionalidadeFaltante: item.funcionalidadeFaltante || ""
               }
-      }))
+        };
+      })
     ].sort((a, b) => new Date(b.data || 0) - new Date(a.data || 0));
 
     return res.json({ logs });

@@ -1041,13 +1041,41 @@ function renderLogsTable(logs) {
   }
   if (logsSearchTerm) {
     const term = normalizeText(logsSearchTerm);
-    filtered = filtered.filter((item) => normalizeText(item.cliente).includes(term) || normalizeText(item.detalhe).includes(term));
+    filtered = filtered.filter((item) => {
+      if (normalizeText(item.cliente).includes(term) || normalizeText(item.detalhe).includes(term)) return true;
+      if (String(item.origem) === "nps" && item.npsColunas) {
+        const blob = Object.values(item.npsColunas).join(" ");
+        if (normalizeText(blob).includes(term)) return true;
+      }
+      const notaStr = item.npsNota != null && item.npsNota !== "" ? String(item.npsNota) : "";
+      if (notaStr && normalizeText(notaStr).includes(term)) return true;
+      return false;
+    });
   }
-  const statusClass = (value) => {
+  const statusClass = (value, tipo) => {
     const normalized = String(value || "").toLowerCase();
+    if (normalizeText(tipo) === "nps") {
+      if (normalized.includes("promotor")) return "status-ganho";
+      if (normalized.includes("detrator")) return "status-perdido";
+      if (normalized.includes("neutro")) return "status-negociacao";
+    }
     if (normalized.includes("ganho")) return "status-ganho";
     if (normalized.includes("perdido") || normalized.includes("detrator") || normalized.includes("churn")) return "status-perdido";
     return "status-negociacao";
+  };
+
+  const npsAuditCells = (item) => {
+    const c = item.npsColunas || {};
+    const mk = (text, suffix) =>
+      `<td class="px-3 py-4 align-top text-xs max-w-[200px]">${renderLogDetailCell(text || "—", `${item.id}-${suffix}`)}</td>`;
+    return (
+      mk(c.melhorar, "melhorar") +
+      mk(c.faltouNota9, "faltou") +
+      mk(c.areas, "areas") +
+      mk(c.experiencia, "exp") +
+      mk(c.funcionalidade, "func") +
+      mk(c.adicional, "adic")
+    );
   };
 
   const interactiveFilterEl = document.getElementById("logs-active-interactive-filter");
@@ -1082,21 +1110,33 @@ function renderLogsTable(logs) {
 
   const body = document.getElementById("logs-table");
   body.innerHTML = filtered.length
-    ? filtered.map((item) => `<tr>
-      <td class="px-6 py-4">${item.tipo}</td>
-      <td class="px-6 py-4"><button class="text-left hover:text-mindlaw-gold/90 hover:underline" data-client-link="${escapeHtml(item.cliente || "")}">${item.cliente || "-"}</button></td>
-      <td class="px-6 py-4">${item.plano || "Sem plano"}</td>
-      <td class="px-6 py-4">${item.data ? new Date(item.data).toLocaleDateString("pt-BR") : "-"}</td>
-      <td class="px-6 py-4"><span class="status-chip ${statusClass(item.status)}">${item.status || "-"}</span></td>
-      <td class="px-6 py-4 align-top">${renderLogDetailCell(item.detalhe || "-", item.id)}</td>
-      <td class="px-6 py-4">
+    ? filtered.map((item) => {
+      const isNps = normalizeText(item.origem) === "nps";
+      const notaCell = isNps && item.npsNota != null && item.npsNota !== "" ? escapeHtml(String(item.npsNota)) : "—";
+      const detalheCell = isNps
+        ? "—"
+        : renderLogDetailCell(item.detalhe || "-", item.id);
+      const dashSix =
+        '<td class="px-3 py-4 align-top text-xs text-mindlaw-white/50">—</td>'.repeat(6);
+      const npsRow = isNps ? npsAuditCells(item) : dashSix;
+      return `<tr>
+      <td class="px-4 py-4">${item.tipo}</td>
+      <td class="px-4 py-4"><button class="text-left hover:text-mindlaw-gold/90 hover:underline" data-client-link="${escapeHtml(item.cliente || "")}">${item.cliente || "-"}</button></td>
+      <td class="px-4 py-4">${item.plano || "Sem plano"}</td>
+      <td class="px-4 py-4">${item.data ? new Date(item.data).toLocaleDateString("pt-BR") : "-"}</td>
+      <td class="px-4 py-4"><span class="status-chip ${statusClass(item.status, item.tipo)}">${item.status || "-"}</span></td>
+      <td class="px-4 py-4 font-mono">${notaCell}</td>
+      <td class="px-4 py-4 align-top">${detalheCell}</td>
+      ${npsRow}
+      <td class="px-4 py-4">
         <div class="flex items-center gap-2">
           <button class="rounded-lg border border-white/20 px-3 py-1 text-xs hover:border-mindlaw-gold/60" data-edit-log-id="${escapeHtml(item.id)}" data-edit-log-origem="${escapeHtml(item.origem)}">Editar</button>
           <button class="rounded-lg border border-rose-400/40 px-3 py-1 text-xs text-rose-200 hover:border-rose-300/70" data-delete-log-id="${escapeHtml(item.id)}" data-delete-log-origem="${escapeHtml(item.origem)}">Apagar</button>
         </div>
       </td>
-    </tr>`).join("")
-    : `<tr><td colspan="7" class="px-6 py-6 text-center text-mindlaw-white/70">Sem registros.</td></tr>`;
+    </tr>`;
+    }).join("")
+    : `<tr><td colspan="14" class="px-6 py-6 text-center text-mindlaw-white/70">Sem registros.</td></tr>`;
 }
 
 function openLogEditModal(item) {
@@ -1162,12 +1202,21 @@ function openLogEditModal(item) {
     document.getElementById("log_edit_plano").value = mapPlanToOption(relatedClient?.plano || "");
   } else {
     const p = item.payload || {};
+    const t = (v) => escapeHtml(String(v ?? ""));
     container.innerHTML = `
-      <input id="log_edit_cliente" class="input-ui" type="text" placeholder="Cliente" value="${escapeHtml(p.cliente || "")}" />
+      <input id="log_edit_cliente" class="input-ui" type="text" placeholder="Cliente" value="${t(p.cliente)}" />
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
         <input id="log_edit_data_nps" class="input-ui" type="date" value="${p.dataNPS ? new Date(p.dataNPS).toISOString().slice(0, 10) : ""}" />
-        <input id="log_edit_nota_nps" class="input-ui" type="number" min="0" max="10" value="${escapeHtml(String(p.notaNPS ?? ""))}" />
+        <input id="log_edit_nota_nps" class="input-ui" type="number" min="0" max="10" value="${t(p.notaNPS)}" />
       </div>
+      <p class="text-xs text-mindlaw-white/60">Respostas por pergunta (NPS)</p>
+      <textarea id="log_edit_nps_melhorar" class="input-ui" rows="2" placeholder="O que poderíamos melhorar... (0–6)">${t(p.npsMelhorarExperiencia)}</textarea>
+      <textarea id="log_edit_nps_faltou" class="input-ui" rows="2" placeholder="O que faltou para nota 9–10... (7–8)">${t(p.npsFaltouNota9)}</textarea>
+      <textarea id="log_edit_nps_areas" class="input-ui" rows="2" placeholder="Áreas a melhorar">${t(p.npsAreasMelhorar)}</textarea>
+      <textarea id="log_edit_nps_experiencia" class="input-ui" rows="2" placeholder="Experiência até aqui (9–10)">${t(p.npsExperienciaAteAqui)}</textarea>
+      <textarea id="log_edit_nps_funcionalidade" class="input-ui" rows="2" placeholder="Funcionalidade / diferencial (9–10)">${t(p.npsFuncionalidadeDiaadia)}</textarea>
+      <textarea id="log_edit_nps_adicional" class="input-ui" rows="2" placeholder="Comentário adicional (sempre)">${t(p.npsComentarioAdicional)}</textarea>
+      <textarea id="log_edit_comentario_nps" class="input-ui" rows="2" placeholder="Texto combinado legado (opcional)">${t(p.comentarioNPS)}</textarea>
       <select id="log_edit_plano" class="input-ui">
         <option value="">Sem plano</option>
         <option value="Starter">Starter</option>
@@ -1175,7 +1224,6 @@ function openLogEditModal(item) {
         <option value="Advanced">Advanced</option>
         <option value="Outros">Outros</option>
       </select>
-      <textarea id="log_edit_comentario_nps" class="input-ui" rows="3" placeholder="Comentário">${escapeHtml(p.comentarioNPS || "")}</textarea>
     `;
     const relatedClient = currentClientRawList.find((c) => normalizeText(c?.nome) === normalizeText(p.cliente));
     document.getElementById("log_edit_plano").value = mapPlanToOption(relatedClient?.plano || "");
@@ -1240,6 +1288,12 @@ async function saveLogEdit() {
       dataNPS: document.getElementById("log_edit_data_nps").value || null,
       notaNPS: document.getElementById("log_edit_nota_nps").value,
       comentarioNPS: document.getElementById("log_edit_comentario_nps").value.trim(),
+      npsMelhorarExperiencia: document.getElementById("log_edit_nps_melhorar")?.value?.trim() || "",
+      npsFaltouNota9: document.getElementById("log_edit_nps_faltou")?.value?.trim() || "",
+      npsAreasMelhorar: document.getElementById("log_edit_nps_areas")?.value?.trim() || "",
+      npsExperienciaAteAqui: document.getElementById("log_edit_nps_experiencia")?.value?.trim() || "",
+      npsFuncionalidadeDiaadia: document.getElementById("log_edit_nps_funcionalidade")?.value?.trim() || "",
+      npsComentarioAdicional: document.getElementById("log_edit_nps_adicional")?.value?.trim() || "",
       plano: document.getElementById("log_edit_plano")?.value || ""
     });
   } else {

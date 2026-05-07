@@ -21,6 +21,17 @@ const {
   importListaAtividadeIfNeeded
 } = require("./services/clientSync");
 
+function extractIntegrationNpsFields(payload = {}) {
+  return {
+    npsMelhorarExperiencia: String(payload.npsMelhorarExperiencia || payload.melhorarExperiencia || "").trim().slice(0, 2000),
+    npsFaltouNota9: String(payload.npsFaltouNota9 || payload.faltouNota9 || "").trim().slice(0, 2000),
+    npsAreasMelhorar: String(payload.npsAreasMelhorar || payload.areasMelhorar || "").trim().slice(0, 2000),
+    npsExperienciaAteAqui: String(payload.npsExperienciaAteAqui || payload.experienciaAteAqui || "").trim().slice(0, 2000),
+    npsFuncionalidadeDiaadia: String(payload.npsFuncionalidadeDiaadia || payload.funcionalidadeDiaadia || "").trim().slice(0, 2000),
+    npsComentarioAdicional: String(payload.npsComentarioAdicional || payload.comentarioAdicional || "").trim().slice(0, 2000)
+  };
+}
+
 dotenv.config();
 
 const app = express();
@@ -84,12 +95,15 @@ app.post("/api/integrations/nps", async (req, res) => {
       return res.status(400).json({ error: parsed.error });
     }
 
+    const structured = extractIntegrationNpsFields(req.body || {});
+
     const support = await Support.create({
       registerType: "nps",
       cliente: parsed.value.cliente,
       notaNPS: parsed.value.notaNPS,
       comentarioNPS: parsed.value.comentarioNPS,
-      dataNPS: parsed.value.dataNPS
+      dataNPS: parsed.value.dataNPS,
+      ...structured
     });
 
     await ensureClientByName(parsed.value.cliente, { plano: String(req.body?.plano || "").trim() });
