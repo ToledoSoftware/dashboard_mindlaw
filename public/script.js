@@ -933,6 +933,36 @@ function renderLogDetailCell(detailText, logId) {
   `;
 }
 
+/**
+ * Colunas NPS alinhadas à ramificação do Forms: 0–6, 7–8, 9–10 + áreas e comentário extra.
+ * Se houver texto na célula (legado/import), a coluna continua visível.
+ */
+function npsColunaAtivaParaNota(nota, coluna, temConteudo) {
+  if (temConteudo) return true;
+  const n = Number(nota);
+  if (!Number.isFinite(n) || n < 0 || n > 10) return true;
+  if (coluna === "melhorar") return n <= 6;
+  if (coluna === "faltou") return n >= 7 && n <= 8;
+  if (coluna === "areas" || coluna === "adicional") return true;
+  if (coluna === "experiencia" || coluna === "funcionalidade") return n >= 9;
+  return true;
+}
+
+function npsColunaTituloInativo(nota, coluna) {
+  const n = Number(nota);
+  const notaTxt = Number.isFinite(n) ? String(n) : "—";
+  if (coluna === "melhorar") {
+    return `Pergunta para notas 0 a 6. Esta resposta tem nota ${notaTxt}.`;
+  }
+  if (coluna === "faltou") {
+    return `Pergunta para notas 7 e 8. Esta resposta tem nota ${notaTxt}.`;
+  }
+  if (coluna === "experiencia" || coluna === "funcionalidade") {
+    return `Pergunta para notas 9 e 10. Esta resposta tem nota ${notaTxt}.`;
+  }
+  return "Não aplicável a esta faixa de nota.";
+}
+
 function mapPlanToOption(plano) {
   const planNormalized = normalizeText(plano || "");
   if (!planNormalized) return "";
@@ -1066,15 +1096,24 @@ function renderLogsTable(logs) {
 
   const npsAuditCells = (item) => {
     const c = item.npsColunas || {};
-    const mk = (text, suffix) =>
-      `<td class="px-3 py-4 align-top text-xs max-w-[200px]">${renderLogDetailCell(text || "—", `${item.id}-${suffix}`)}</td>`;
+    const nota = item.npsNota;
+    const mk = (coluna, texto, suffix) => {
+      const bruto = String(texto || "").trim();
+      const temConteudo = Boolean(bruto);
+      const ativa = npsColunaAtivaParaNota(nota, coluna, temConteudo);
+      if (!ativa) {
+        const title = escapeHtml(npsColunaTituloInativo(nota, coluna));
+        return `<td class="px-3 py-4 align-top text-xs max-w-[200px] text-mindlaw-white/35 bg-mindlaw-dark/30" title="${title}"><span class="select-none">—</span></td>`;
+      }
+      return `<td class="px-3 py-4 align-top text-xs max-w-[200px]">${renderLogDetailCell(temConteudo ? bruto : "—", `${item.id}-${suffix}`)}</td>`;
+    };
     return (
-      mk(c.melhorar, "melhorar") +
-      mk(c.faltouNota9, "faltou") +
-      mk(c.areas, "areas") +
-      mk(c.experiencia, "exp") +
-      mk(c.funcionalidade, "func") +
-      mk(c.adicional, "adic")
+      mk("melhorar", c.melhorar, "melhorar") +
+      mk("faltou", c.faltouNota9, "faltou") +
+      mk("areas", c.areas, "areas") +
+      mk("experiencia", c.experiencia, "exp") +
+      mk("funcionalidade", c.funcionalidade, "func") +
+      mk("adicional", c.adicional, "adic")
     );
   };
 
