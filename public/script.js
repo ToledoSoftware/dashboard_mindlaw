@@ -14,6 +14,7 @@ let logsFilterType = "";
 let logsFilterPlan = "";
 let logsSearchTerm = "";
 let editingLog = null;
+const LOG_DETAIL_PREVIEW_LIMIT = 220;
 
 const CLIENT_STATUS_LABELS = {
   cliente: "Cliente (ativo)",
@@ -250,6 +251,42 @@ function includesSearch(client, term) {
   const raw = String(term || "").replace(/\D/g, "");
   const phoneMatch = raw ? tel.includes(raw) : false;
   return nome.includes(base) || email.includes(base) || phoneMatch;
+}
+
+function formatPhoneBr(value) {
+  const digits = String(value || "").replace(/\D/g, "").slice(0, 11);
+  if (!digits) return "";
+  if (digits.length <= 2) return `(${digits}`;
+  if (digits.length <= 3) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2, 3)} ${digits.slice(3)}`;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 3)} ${digits.slice(3, 7)}-${digits.slice(7)}`;
+}
+
+function hasValidPhoneBr(value) {
+  return String(value || "").replace(/\D/g, "").length === 11;
+}
+
+function setupPhoneMask(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.maxLength = 16;
+  input.placeholder = "(xx) x xxxx-xxxx";
+  input.addEventListener("input", () => {
+    input.value = formatPhoneBr(input.value);
+  });
+  input.addEventListener("blur", () => {
+    const formatted = formatPhoneBr(input.value);
+    if (!formatted) {
+      input.value = "";
+      return;
+    }
+    if (!hasValidPhoneBr(formatted)) {
+      toast("Telefone inválido. Use o padrão (xx) x xxxx-xxxx.");
+      input.focus();
+      return;
+    }
+    input.value = formatted;
+  });
 }
 
 function getElapsedMonthsSince(cadastroDate) {
@@ -883,6 +920,19 @@ function escapeHtml(text) {
     .replace(/"/g, "&quot;");
 }
 
+function renderLogDetailCell(detailText, logId) {
+  const raw = String(detailText || "-");
+  const safe = escapeHtml(raw);
+  if (raw.length <= LOG_DETAIL_PREVIEW_LIMIT) return safe;
+  const short = escapeHtml(`${raw.slice(0, LOG_DETAIL_PREVIEW_LIMIT)}...`);
+  const safeId = escapeHtml(String(logId || ""));
+  return `
+    <span data-log-detail-short="${safeId}">${short}</span>
+    <span class="hidden whitespace-pre-wrap" data-log-detail-full="${safeId}">${safe}</span>
+    <button class="ml-2 text-xs text-mindlaw-gold/90 hover:underline" data-log-detail-toggle="${safeId}" data-expanded="0">Ver mais</button>
+  `;
+}
+
 function mapPlanToOption(plano) {
   const planNormalized = normalizeText(plano || "");
   if (!planNormalized) return "";
@@ -1038,7 +1088,7 @@ function renderLogsTable(logs) {
       <td class="px-6 py-4">${item.plano || "Sem plano"}</td>
       <td class="px-6 py-4">${item.data ? new Date(item.data).toLocaleDateString("pt-BR") : "-"}</td>
       <td class="px-6 py-4"><span class="status-chip ${statusClass(item.status)}">${item.status || "-"}</span></td>
-      <td class="px-6 py-4">${item.detalhe || "-"}</td>
+      <td class="px-6 py-4 align-top">${renderLogDetailCell(item.detalhe || "-", item.id)}</td>
       <td class="px-6 py-4">
         <div class="flex items-center gap-2">
           <button class="rounded-lg border border-white/20 px-3 py-1 text-xs hover:border-mindlaw-gold/60" data-edit-log-id="${escapeHtml(item.id)}" data-edit-log-origem="${escapeHtml(item.origem)}">Editar</button>
@@ -1265,7 +1315,7 @@ function renderClients(clients) {
     ? pageList.map((c) => {
       const st = c.statusContrato || "cliente";
       const chipClass = `cli-chip cli-st-${statusKey(st)}`;
-      const phone = String(c.telefone || "").trim();
+      const phone = formatPhoneBr(c.telefone || "");
       const phoneHtml = phone
         ? `<button class="hover:text-mindlaw-gold/90 hover:underline" data-copy-phone="${escapeHtml(phone)}">${escapeHtml(phone)}</button>`
         : "Sem telefone";
@@ -1303,7 +1353,7 @@ function openClientEditModal(clientId) {
   if (!target) return;
   editingClientId = String(target._id);
   document.getElementById("edit_client_nome").value = target.nome || "";
-  document.getElementById("edit_client_telefone").value = target.telefone || "";
+  document.getElementById("edit_client_telefone").value = formatPhoneBr(target.telefone || "");
   document.getElementById("edit_client_email").value = target.email || "";
   document.getElementById("edit_client_status").value = target.statusContrato || "cliente";
   const editPlano = document.getElementById("edit_client_plano");
@@ -1324,12 +1374,15 @@ async function salvarEdicaoCliente() {
     if (!editingClientId) throw new Error("Cliente inválido.");
     const payload = {
       nome: document.getElementById("edit_client_nome").value.trim(),
-      telefone: document.getElementById("edit_client_telefone").value.trim(),
+      telefone: formatPhoneBr(document.getElementById("edit_client_telefone").value.trim()),
       email: document.getElementById("edit_client_email").value.trim(),
       statusContrato: document.getElementById("edit_client_status").value,
       plano: document.getElementById("edit_client_plano").value || "",
       dataReferencia: document.getElementById("edit_client_data_ref").value || null
     };
+    if (payload.telefone && !hasValidPhoneBr(payload.telefone)) {
+      throw new Error("Telefone inválido. Use o padrão (xx) x xxxx-xxxx.");
+    }
     await apiService.updateClient(editingClientId, payload);
     document.getElementById("client-edit-modal")?.close();
     toast("Cliente atualizado.");
@@ -1612,13 +1665,16 @@ async function salvarCliente() {
     const modal = document.getElementById("new-client-modal");
     const payload = {
       nome: document.getElementById("new_client_nome").value.trim(),
-      telefone: document.getElementById("new_client_telefone").value.trim(),
+      telefone: formatPhoneBr(document.getElementById("new_client_telefone").value.trim()),
       email: document.getElementById("new_client_email").value.trim(),
       statusContrato: document.getElementById("new_client_status")?.value || "cliente",
       plano: document.getElementById("new_client_plano")?.value || "",
       dataReferencia: document.getElementById("new_client_data_ref")?.value || null
     };
     if (!payload.nome) throw new Error("Nome é obrigatório.");
+    if (payload.telefone && !hasValidPhoneBr(payload.telefone)) {
+      throw new Error("Telefone inválido. Use o padrão (xx) x xxxx-xxxx.");
+    }
     await apiService.createClient(payload);
     lastCreatedClientName = payload.nome;
     document.getElementById("new_client_nome").value = "";
@@ -1671,6 +1727,8 @@ function bindEvents() {
   document.getElementById("btn-export")?.addEventListener("click", baixarPlanilha);
   document.getElementById("btn-export-clients")?.addEventListener("click", baixarRelatorioClientes);
   document.getElementById("btn-logout")?.addEventListener("click", logout);
+  setupPhoneMask("new_client_telefone");
+  setupPhoneMask("edit_client_telefone");
   document.getElementById("btn-open-new-client-modal")?.addEventListener("click", openNewClientModal);
   document.getElementById("btn-comercial-new-client")?.addEventListener("click", openNewClientModal);
   document.getElementById("btn-suporte-new-client")?.addEventListener("click", openNewClientModal);
@@ -1866,6 +1924,20 @@ function bindEvents() {
     toast("Filtro interativo removido.");
   });
   document.getElementById("logs-table")?.addEventListener("click", async (event) => {
+    const detailToggle = event.target.closest("[data-log-detail-toggle]");
+    if (detailToggle) {
+      const id = detailToggle.getAttribute("data-log-detail-toggle") || "";
+      const expanded = detailToggle.getAttribute("data-expanded") === "1";
+      const shortEl = document.querySelector(`[data-log-detail-short="${id}"]`);
+      const fullEl = document.querySelector(`[data-log-detail-full="${id}"]`);
+      if (shortEl && fullEl) {
+        shortEl.classList.toggle("hidden", !expanded);
+        fullEl.classList.toggle("hidden", expanded);
+        detailToggle.setAttribute("data-expanded", expanded ? "0" : "1");
+        detailToggle.textContent = expanded ? "Ver mais" : "Ver menos";
+      }
+      return;
+    }
     const editBtn = event.target.closest("[data-edit-log-id]");
     if (editBtn) {
       const origem = editBtn.getAttribute("data-edit-log-origem") || "";
