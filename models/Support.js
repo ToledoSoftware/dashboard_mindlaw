@@ -13,16 +13,16 @@ const supportSchema = new mongoose.Schema(
     },
     funcionalidadeFaltante: { type: String, default: "", trim: true, maxlength: 500 },
     notaNPS: { type: Number, min: 0, max: 10 },
-    comentarioNPS: { type: String, maxlength: 2000, default: "" },
+    comentarioNPS: { type: String, maxlength: 10000, default: "" },
     dataNPS: { type: Date },
     categoriaNPS: { type: String, enum: ["Promotor", "Neutro", "Detrator"] },
     /** Respostas abertas por coluna (pesquisa NPS em ramificações) */
-    npsMelhorarExperiencia: { type: String, default: "", trim: true, maxlength: 2000 },
-    npsFaltouNota9: { type: String, default: "", trim: true, maxlength: 2000 },
-    npsAreasMelhorar: { type: String, default: "", trim: true, maxlength: 2000 },
-    npsExperienciaAteAqui: { type: String, default: "", trim: true, maxlength: 2000 },
-    npsFuncionalidadeDiaadia: { type: String, default: "", trim: true, maxlength: 2000 },
-    npsComentarioAdicional: { type: String, default: "", trim: true, maxlength: 2000 }
+    npsMelhorarExperiencia: { type: String, default: "", trim: true, maxlength: 10000 },
+    npsFaltouNota9: { type: String, default: "", trim: true, maxlength: 10000 },
+    npsAreasMelhorar: { type: String, default: "", trim: true, maxlength: 10000 },
+    npsExperienciaAteAqui: { type: String, default: "", trim: true, maxlength: 10000 },
+    npsFuncionalidadeDiaadia: { type: String, default: "", trim: true, maxlength: 10000 },
+    npsComentarioAdicional: { type: String, default: "", trim: true, maxlength: 10000 }
   },
   { timestamps: true }
 );

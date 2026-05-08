@@ -57,7 +57,8 @@
         <button id="nav-resumo" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Visão Geral</button>
         <button id="nav-clientes" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Clientes</button>
         <button id="nav-comercial" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Comercial</button>
-        <button id="nav-suporte" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Suporte</button>
+        <button id="nav-churn" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Churn</button>
+        <button id="nav-nps" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">NPS</button>
         <button id="nav-lancamentos" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Lançamentos</button>
         <button id="nav-logs" class="nav-item w-full rounded-xl border border-transparent px-3 py-2.5 text-left text-sm font-semibold">Auditoria</button>
       </nav>
@@ -71,9 +72,9 @@
         <h2 class="text-center text-3xl font-extrabold tracking-tight">Visão Geral</h2>
         <div class="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 cursor-pointer hover:border-mindlaw-gold/60" data-go-tab="comercial"><p class="text-xs text-mindlaw-white/70">Receita Ganha (Período)</p><p id="kpi-resumo-receita" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">R$ 0</p></article>
-          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 cursor-pointer hover:border-mindlaw-gold/60" data-go-tab="suporte"><p class="text-xs text-mindlaw-white/70">MRR Perdido (Período)</p><p id="kpi-resumo-mrr" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">R$ 0</p></article>
-          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 cursor-pointer hover:border-mindlaw-gold/60" data-go-tab="suporte"><p class="text-xs text-mindlaw-white/70">Churn Rate</p><p id="kpi-resumo-churn" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p></article>
-          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 cursor-pointer hover:border-mindlaw-gold/60" data-go-tab="suporte"><p class="text-xs text-mindlaw-white/70">NPS Score</p><p id="kpi-resumo-nps" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">0%</p></article>
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 cursor-pointer hover:border-mindlaw-gold/60" data-go-tab="churn"><p class="text-xs text-mindlaw-white/70">MRR Perdido (Período)</p><p id="kpi-resumo-mrr" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">R$ 0</p></article>
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 cursor-pointer hover:border-mindlaw-gold/60" data-go-tab="churn"><p class="text-xs text-mindlaw-white/70">Churn Rate</p><p id="kpi-resumo-churn" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p></article>
+          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 cursor-pointer hover:border-mindlaw-gold/60" data-go-tab="nps"><p class="text-xs text-mindlaw-white/70">NPS Score</p><p id="kpi-resumo-nps" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-gold">0%</p></article>
         </div>
         <article class="panel border-t-2 border-mindlaw-gold p-6 space-y-4">
           <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
@@ -126,43 +127,57 @@
         </div>
       </section>
 
-      <section id="view-suporte" class="tab-view hidden space-y-6">
+      <section id="view-churn" class="tab-view hidden space-y-6">
         <div class="flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
-          <h2 class="text-center text-3xl font-extrabold tracking-tight">Suporte</h2>
-          <button type="button" id="btn-suporte-new-client" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-mindlaw-gold/40 bg-mindlaw-gold/10 text-xl font-bold text-mindlaw-gold hover:bg-mindlaw-gold hover:text-mindlaw-dark" title="Cadastrar cliente" aria-label="Cadastrar cliente">+</button>
+          <h2 class="text-center text-3xl font-extrabold tracking-tight">Churn</h2>
+          <button type="button" id="btn-churn-new-client" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-mindlaw-gold/40 bg-mindlaw-gold/10 text-xl font-bold text-mindlaw-gold hover:bg-mindlaw-gold hover:text-mindlaw-dark" title="Cadastrar cliente" aria-label="Cadastrar cliente">+</button>
         </div>
-        <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">Saúde da Carteira (Churn)</p><p id="kpi-churn" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p></article>
-          <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5"><p class="text-xs text-mindlaw-white/70">Voz do Cliente (NPS Score)</p><p id="kpi-nps" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p></article>
-        </div>
+        <p class="mx-auto max-w-2xl text-center text-sm text-mindlaw-white/65">Taxa de churn, calendário de cancelamentos por mês e motivos de saída — independente da área NPS.</p>
+        <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 max-w-md mx-auto w-full">
+          <p class="text-xs text-mindlaw-white/70">Saúde da Carteira (Churn rate)</p>
+          <p id="kpi-churn" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p>
+        </article>
         <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
           <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6">
             <div class="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-              <h3 class="text-lg font-semibold tracking-tight text-mindlaw-white/85">Saúde da Carteira (Churn por Mês)</h3>
+              <h3 class="text-lg font-semibold tracking-tight text-mindlaw-white/85">Cancelamentos por mês</h3>
               <div class="flex items-center gap-2">
-                <label for="support-heatmap-year" class="text-xs text-mindlaw-white/65">Ano</label>
-                <select id="support-heatmap-year" class="input-ui !min-h-10 !w-[110px] !py-2"></select>
+                <label for="churn-heatmap-year" class="text-xs text-mindlaw-white/65">Ano</label>
+                <select id="churn-heatmap-year" class="input-ui !min-h-10 !w-[110px] !py-2"></select>
               </div>
             </div>
-            <div id="heatmap" class="grid grid-cols-6 gap-2 text-xs"></div>
+            <div id="churn-heatmap" class="grid grid-cols-6 gap-2 text-xs"></div>
             <div class="mt-4 rounded-xl border border-white/10 bg-mindlaw-teal/35 p-4">
               <div class="mb-2 flex items-center justify-between gap-2">
-                <h4 id="support-month-detail-title" class="text-sm font-semibold text-mindlaw-white/90">Detalhes do mês</h4>
-                <span class="text-xs text-mindlaw-white/60">Clique em um card do mês</span>
+                <h4 id="churn-month-detail-title" class="text-sm font-semibold text-mindlaw-white/90">Detalhes do mês</h4>
+                <span class="text-xs text-mindlaw-white/60">Clique em um mês</span>
               </div>
-              <div id="support-month-detail-list" class="space-y-2 text-sm text-mindlaw-white/80">
+              <div id="churn-month-detail-list" class="space-y-2 text-sm text-mindlaw-white/80">
                 <p class="text-mindlaw-white/60">Selecione um mês para listar os churns cadastrados.</p>
               </div>
             </div>
           </article>
-          <div class="space-y-6">
-            <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6"><h3 class="mb-4 text-lg font-semibold tracking-tight text-mindlaw-white/85">Voz do Cliente (Distribuicao NPS)</h3><div class="h-72"><canvas id="chartNps"></canvas></div></article>
-            <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6">
-              <h3 class="mb-4 text-lg font-semibold tracking-tight text-mindlaw-white/85">Distribuição dos Motivos de Cancelamento</h3>
-              <div class="h-72"><canvas id="chartChurnReasons"></canvas></div>
-            </article>
-          </div>
+          <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6">
+            <h3 class="mb-4 text-lg font-semibold tracking-tight text-mindlaw-white/85">Motivos de cancelamento</h3>
+            <div class="h-72"><canvas id="chartChurnReasons"></canvas></div>
+          </article>
         </div>
+      </section>
+
+      <section id="view-nps" class="tab-view hidden space-y-6">
+        <div class="flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-4">
+          <h2 class="text-center text-3xl font-extrabold tracking-tight">NPS</h2>
+          <button type="button" id="btn-nps-new-client" class="inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-mindlaw-gold/40 bg-mindlaw-gold/10 text-xl font-bold text-mindlaw-gold hover:bg-mindlaw-gold hover:text-mindlaw-dark" title="Cadastrar cliente" aria-label="Cadastrar cliente">+</button>
+        </div>
+        <p class="mx-auto max-w-2xl text-center text-sm text-mindlaw-white/65">Pesquisa de satisfação, distribuição promotores / neutros / detratores e link direto para a auditoria de feedback.</p>
+        <article class="panel reveal-card kpi-card border-t-2 border-mindlaw-gold p-5 max-w-md mx-auto w-full">
+          <p class="text-xs text-mindlaw-white/70">NPS Score (período)</p>
+          <p id="kpi-nps" class="mt-2 font-mono text-4xl font-extrabold tracking-tight text-mindlaw-white">0%</p>
+        </article>
+        <article class="panel reveal-card border-t-2 border-mindlaw-gold p-6 max-w-3xl mx-auto w-full">
+          <h3 class="mb-4 text-lg font-semibold tracking-tight text-mindlaw-white/85">Distribuição NPS</h3>
+          <div class="h-80"><canvas id="chartNps"></canvas></div>
+        </article>
       </section>
 
       <section id="view-lancamentos" class="tab-view hidden space-y-6">
@@ -352,13 +367,18 @@
 
       <section id="view-logs" class="tab-view hidden space-y-6">
         <h2 class="text-center text-3xl font-extrabold tracking-tight">Auditoria</h2>
+        <nav id="audit-section-nav" class="flex flex-wrap items-center justify-center gap-2" aria-label="Tipo de lançamento">
+          <button type="button" data-audit-section="comercial" class="audit-tab rounded-xl border border-white/15 px-4 py-2.5 text-sm font-semibold text-mindlaw-white/90 hover:border-mindlaw-gold/50">Comercial</button>
+          <button type="button" data-audit-section="churn" class="audit-tab rounded-xl border border-white/15 px-4 py-2.5 text-sm font-semibold text-mindlaw-white/90 hover:border-mindlaw-gold/50">Churn</button>
+          <button type="button" data-audit-section="nps" class="audit-tab rounded-xl border border-white/15 px-4 py-2.5 text-sm font-semibold text-mindlaw-white/90 hover:border-mindlaw-gold/50">NPS</button>
+        </nav>
+        <p id="audit-section-hint" class="text-center text-xs text-mindlaw-white/55">Cada aba mostra só as colunas relevantes para aquele tipo de registro.</p>
         <article class="panel border-t-2 border-mindlaw-gold p-4">
-          <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
-            <select id="filter-logs-type" class="input-ui">
-              <option value="">Todos os tipos</option>
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <select id="filter-logs-type" class="input-ui sr-only" aria-hidden="true" tabindex="-1">
               <option value="comercial">Comercial</option>
               <option value="churn">Churn</option>
-              <option value="nps">NPS</option>
+              <option value="nps" selected>NPS</option>
             </select>
             <select id="filter-logs-plan" class="input-ui">
               <option value="">Todos os planos</option>
@@ -375,24 +395,9 @@
         </article>
         <article class="panel border-t-2 border-mindlaw-gold overflow-hidden">
           <div class="overflow-x-auto">
-            <table class="w-full min-w-[1400px] text-left text-sm">
-              <thead class="bg-mindlaw-gold/10 text-mindlaw-gold">
-                <tr>
-                  <th class="px-4 py-3">Tipo</th>
-                  <th class="px-4 py-3">Cliente</th>
-                  <th class="px-4 py-3">Plano</th>
-                  <th class="px-4 py-3">Data</th>
-                  <th class="px-4 py-3">Categoria NPS</th>
-                  <th class="px-4 py-3">Nota</th>
-                  <th class="px-4 py-3">Detalhe</th>
-                  <th class="max-w-[200px] px-3 py-3 text-xs font-semibold" title="O que poderíamos melhorar para tornar sua experiência melhor? (geralmente notas 0 a 6)">Melhorar exp.</th>
-                  <th class="max-w-[200px] px-3 py-3 text-xs font-semibold" title="O que faltou para sua experiência com o MindLaw ser nota 9 ou 10? (geralmente notas 7 e 8)">Até nota 9–10</th>
-                  <th class="max-w-[200px] px-3 py-3 text-xs font-semibold" title="Quais áreas você acredita que ainda podem melhorar?">Áreas</th>
-                  <th class="max-w-[200px] px-3 py-3 text-xs font-semibold" title="Como tem sido sua experiência com o MindLaw até aqui? (geralmente notas 9 e 10)">Experiência</th>
-                  <th class="max-w-[200px] px-3 py-3 text-xs font-semibold" title="Qual funcionalidade ou diferencial do MindLaw mais ajuda no seu dia a dia? (geralmente notas 9 e 10)">Funcionalidade</th>
-                  <th class="max-w-[220px] px-3 py-3 text-xs font-semibold" title="Gostaria de compartilhar mais algum comentário, sugestão ou experiência sobre o MindLaw?">Comentário extra</th>
-                  <th class="px-4 py-3">Ações</th>
-                </tr>
+            <table class="w-full min-w-[720px] text-left text-sm">
+              <thead id="logs-thead" class="bg-mindlaw-gold/10 text-mindlaw-gold">
+                <tr id="logs-thead-row"></tr>
               </thead>
               <tbody id="logs-table" class="divide-y divide-white/5"></tbody>
             </table>

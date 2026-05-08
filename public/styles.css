@@ -172,14 +172,16 @@ body::before {
 
   #view-resumo .grid,
   #view-comercial .grid,
-  #view-suporte .grid,
+  #view-churn .grid,
+  #view-nps .grid,
   #view-lancamentos .grid {
     grid-template-columns: 1fr !important;
   }
 
   #view-resumo h2,
   #view-comercial h2,
-  #view-suporte h2,
+  #view-churn h2,
+  #view-nps h2,
   #view-lancamentos h2,
   #view-clientes h2,
   #view-logs h2 {

@@ -157,7 +157,7 @@ function backfillExistingResponses() {
 }
 
 function parseRow_(e) {
-  const named = (e && e.namedValues) ? e.namedValues : {};
+  const named = eventToNamedValues_(e);
   const get = (possibleKeys) => {
     for (const key of possibleKeys) {
       if (Object.prototype.hasOwnProperty.call(named, key)) {
@@ -192,11 +192,13 @@ function parseRow_(e) {
     "De 0 a 10, o quanto você indicaria o MindLaw para outro advogado ou escritório?",
     "De 0 a 10, o quanto voc� indicaria o MindLaw para outro advogado ou escrit�rio?"
   ]);
+  const notaRawResolved = resolveNotaRaw_(notaRaw, named);
 
-  const feedbackDetalhado = buildStructuredNpsPayload_(get);
-  const notaNPS = parseNpsScore_(notaRaw);
+  const feedbackDetalhado = buildStructuredNpsPayload_(get, named);
+  const notaNPS = parseNpsScore_(notaRawResolved);
   if (!Number.isFinite(notaNPS)) {
-    throw new Error("Nota NPS inválida: " + notaRaw);
+    Logger.log("Chaves recebidas no evento: " + Object.keys(named).join(" | "));
+    throw new Error("Nota NPS inválida: " + notaRawResolved);
   }
 
   const notaAjustada = Math.max(0, Math.min(10, notaNPS));
@@ -222,8 +224,89 @@ function parseRow_(e) {
   };
 }
 
+function eventToNamedValues_(e) {
+  if (!e) return {};
+
+  if (e.namedValues && typeof e.namedValues === "object") {
+    return e.namedValues;
+  }
+
+  // Trigger do Google Forms (não da planilha): converte item responses para formato namedValues.
+  if (e.response && typeof e.response.getItemResponses === "function") {
+    const named = {};
+    const items = e.response.getItemResponses();
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      const title = item && item.getItem ? String(item.getItem().getTitle() || "").trim() : "";
+      if (!title) continue;
+      const response = item && item.getResponse ? item.getResponse() : "";
+      named[title] = [response];
+    }
+    if (e.response.getTimestamp) {
+      named["Carimbo de data/hora"] = [e.response.getTimestamp()];
+    }
+    return named;
+  }
+
+  // Fallback para evento da planilha com values + range (sem namedValues).
+  if (Array.isArray(e.values) && e.range && typeof e.range.getSheet === "function") {
+    const sheet = e.range.getSheet();
+    const lastCol = sheet.getLastColumn();
+    const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    const named = {};
+    for (let i = 0; i < headers.length && i < e.values.length; i++) {
+      const header = String(headers[i] || "").trim();
+      if (!header) continue;
+      named[header] = [e.values[i]];
+    }
+    return named;
+  }
+
+  return {};
+}
+
+function resolveNotaRaw_(notaRaw, namedValues) {
+  const direct = String(notaRaw || "").trim();
+  if (direct) return direct;
+
+  if (namedValues) {
+    const fromApprox =
+      getByApproxHeader_(namedValues, "de 0 a 10") ||
+      getByApproxHeader_(namedValues, "o quanto você indicaria") ||
+      getByApproxHeader_(namedValues, "o quanto voce indicaria") ||
+      findValueByHeaderKeywords_(namedValues, ["0", "10", "indicaria"]) ||
+      findValueByHeaderKeywords_(namedValues, ["indicaria", "mindlaw"]) ||
+      "";
+    const approxTrimmed = String(fromApprox || "").trim();
+    if (approxTrimmed) return approxTrimmed;
+  }
+
+  // Último fallback: procura qualquer resposta com nota plausível (0-10).
+  const keys = Object.keys(namedValues || {});
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    const normalizedKey = normalizeHeader_(key);
+    if (
+      normalizedKey.indexOf("carimbo de data") !== -1 ||
+      normalizedKey.indexOf("email") !== -1 ||
+      normalizedKey.indexOf("e-mail") !== -1 ||
+      normalizedKey.indexOf("nome") !== -1
+    ) {
+      continue;
+    }
+    const raw = namedValues[key];
+    const value = Array.isArray(raw) ? raw[0] : raw;
+    const score = parseNpsScore_(value);
+    if (Number.isFinite(score) && score >= 0 && score <= 10) {
+      return String(value || "").trim();
+    }
+  }
+
+  return direct;
+}
+
 /** Colunas alinhadas ao formulário: ramificação por nota + colunas fixas. */
-function buildStructuredNpsPayload_(get) {
+function buildStructuredNpsPayload_(get, namedValues) {
   const Q_MELHORAR = [
     "O que poderíamos melhorar para tornar sua experiência melhor?",
     "O que poder�amos melhorar para tornar sua experi�ncia melhor?"
@@ -249,14 +332,56 @@ function buildStructuredNpsPayload_(get) {
   ];
 
   let npsMelhorarExperiencia = trimStr_(get(Q_MELHORAR));
-  const npsFaltouNota9 = trimStr_(get(Q_FALTOU));
-  const npsAreasMelhorar = trimStr_(get(Q_AREAS));
-  const npsExperienciaAteAqui = trimStr_(get(Q_EXP));
-  const npsFuncionalidadeDiaadia = trimStr_(get(Q_FUNC));
-  const npsComentarioAdicional = trimStr_(get(Q_EXTRA));
+  let npsFaltouNota9 = trimStr_(get(Q_FALTOU));
+  let npsAreasMelhorar = trimStr_(get(Q_AREAS));
+  let npsExperienciaAteAqui = trimStr_(get(Q_EXP));
+  let npsFuncionalidadeDiaadia = trimStr_(get(Q_FUNC));
+  let npsComentarioAdicional = trimStr_(get(Q_EXTRA));
+
+  /** Fallback: cabeçalho no Sheets pode ser ligeiramente diferente do texto do Forms. */
+  if (!npsComentarioAdicional && namedValues) {
+    npsComentarioAdicional = trimStr_(getByApproxHeader_(namedValues, Q_EXTRA[0]));
+    if (!npsComentarioAdicional) {
+      npsComentarioAdicional = trimStr_(findValueByHeaderKeywords_(namedValues, ["gostaria", "compartilhar", "mindlaw"]));
+    }
+  }
+
+  /** Colunas cuja string no Sheets pode não bater com o texto canónico do Forms. */
+  if (!npsExperienciaAteAqui && namedValues) {
+    npsExperienciaAteAqui = trimStr_(getByApproxHeader_(namedValues, Q_EXP[0]));
+    if (!npsExperienciaAteAqui) {
+      npsExperienciaAteAqui = trimStr_(findValueByHeaderKeywords_(namedValues, ["experiencia", "mindlaw", "aqui"]));
+    }
+  }
+  if (!npsFuncionalidadeDiaadia && namedValues) {
+    npsFuncionalidadeDiaadia = trimStr_(getByApproxHeader_(namedValues, Q_FUNC[0]));
+    if (!npsFuncionalidadeDiaadia) {
+      npsFuncionalidadeDiaadia =
+        trimStr_(findValueByHeaderKeywords_(namedValues, ["funcionalidade", "mindlaw"])) ||
+        trimStr_(findValueByHeaderKeywords_(namedValues, ["diferencial", "mindlaw", "dia"]));
+    }
+  }
+  if (!npsAreasMelhorar && namedValues) {
+    npsAreasMelhorar = trimStr_(getByApproxHeader_(namedValues, Q_AREAS[0]));
+    if (!npsAreasMelhorar) {
+      npsAreasMelhorar = trimStr_(findValueByHeaderKeywords_(namedValues, ["quais", "areas"]));
+    }
+  }
+  if (!npsFaltouNota9 && namedValues) {
+    npsFaltouNota9 = trimStr_(getByApproxHeader_(namedValues, Q_FALTOU[0]));
+    if (!npsFaltouNota9) {
+      npsFaltouNota9 = trimStr_(findValueByHeaderKeywords_(namedValues, ["faltou", "mindlaw", "nota"]));
+    }
+  }
 
   if (!npsMelhorarExperiencia) {
     npsMelhorarExperiencia = trimStr_(get(["Qual foi o principal motivo da sua nota?"]));
+  }
+  if (!npsMelhorarExperiencia && namedValues) {
+    npsMelhorarExperiencia =
+      trimStr_(getByApproxHeader_(namedValues, Q_MELHORAR[0])) ||
+      trimStr_(findValueByHeaderKeywords_(namedValues, ["poderiamos", "experiencia", "melhorar"])) ||
+      trimStr_(findValueByHeaderKeywords_(namedValues, ["poderamos", "experiencia", "melhorar"]));
   }
 
   const comentarioNPS = buildLegacyCombinedComentario_({
@@ -268,14 +393,15 @@ function buildStructuredNpsPayload_(get) {
     npsComentarioAdicional: npsComentarioAdicional
   });
 
+  var maxField = 10000;
   return {
-    npsMelhorarExperiencia: npsMelhorarExperiencia.slice(0, 2000),
-    npsFaltouNota9: npsFaltouNota9.slice(0, 2000),
-    npsAreasMelhorar: npsAreasMelhorar.slice(0, 2000),
-    npsExperienciaAteAqui: npsExperienciaAteAqui.slice(0, 2000),
-    npsFuncionalidadeDiaadia: npsFuncionalidadeDiaadia.slice(0, 2000),
-    npsComentarioAdicional: npsComentarioAdicional.slice(0, 2000),
-    comentarioNPS: comentarioNPS.slice(0, 2000)
+    npsMelhorarExperiencia: npsMelhorarExperiencia.slice(0, maxField),
+    npsFaltouNota9: npsFaltouNota9.slice(0, maxField),
+    npsAreasMelhorar: npsAreasMelhorar.slice(0, maxField),
+    npsExperienciaAteAqui: npsExperienciaAteAqui.slice(0, maxField),
+    npsFuncionalidadeDiaadia: npsFuncionalidadeDiaadia.slice(0, maxField),
+    npsComentarioAdicional: npsComentarioAdicional.slice(0, maxField),
+    comentarioNPS: comentarioNPS.slice(0, maxField)
   };
 }
 
@@ -319,6 +445,29 @@ function getByApproxHeader_(namedValues, expectedHeader) {
     if (normalizedKey.includes(expected) || expected.includes(normalizedKey)) {
       const arr = namedValues[realKey];
       return Array.isArray(arr) ? arr[0] : arr;
+    }
+  }
+  return "";
+}
+
+/** Todas as palavras (normalizadas) devem aparecer no cabeçalho da coluna. */
+function findValueByHeaderKeywords_(namedValues, keywords) {
+  const keys = Object.keys(namedValues || {});
+  const normKw = (keywords || []).map(function (k) {
+    return normalizeHeader_(k).replace(/\s+/g, " ").trim();
+  });
+  for (let i = 0; i < keys.length; i++) {
+    const nk = normalizeHeader_(keys[i]);
+    let ok = true;
+    for (let j = 0; j < normKw.length; j++) {
+      if (!normKw[j] || nk.indexOf(normKw[j]) === -1) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) {
+      const raw = namedValues[keys[i]];
+      return Array.isArray(raw) ? raw[0] : raw;
     }
   }
   return "";

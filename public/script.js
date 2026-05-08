@@ -10,10 +10,50 @@ let clientsPage = 1;
 let clientsPageSize = 25;
 let clientsSearchTerm = "";
 let selectedSupportMonth = null;
-let logsFilterType = "";
+let logsFilterType = "nps";
 let logsFilterPlan = "";
 let logsSearchTerm = "";
 let editingLog = null;
+const LOGS_AUDIT_HINTS = {
+  comercial: "Vendas e oportunidades: status, valor do contrato e motivo quando a venda foi perdida.",
+  churn: "Cancelamentos: data, valor perdido, motivo e observações do churn.",
+  nps: "NPS: as respostas do formulário aparecem numa única coluna, na ordem das perguntas."
+};
+
+function getEffectiveLogsAuditMode() {
+  const t = String(logsFilterType || "").trim();
+  if (t === "comercial" || t === "churn" || t === "nps") return t;
+  return "nps";
+}
+
+function updateAuditSectionUI() {
+  const mode = getEffectiveLogsAuditMode();
+  const hint = document.getElementById("audit-section-hint");
+  if (hint) hint.textContent = LOGS_AUDIT_HINTS[mode] || "";
+  document.querySelectorAll(".audit-tab[data-audit-section]").forEach((btn) => {
+    const sec = btn.getAttribute("data-audit-section");
+    const active = sec === mode;
+    btn.classList.toggle("border-mindlaw-gold/60", active);
+    btn.classList.toggle("bg-mindlaw-gold/15", active);
+    btn.classList.toggle("text-mindlaw-gold", active);
+    btn.classList.toggle("border-white/15", !active);
+    btn.setAttribute("aria-current", active ? "true" : "false");
+  });
+}
+
+function setLogsAuditSection(section, { render = true } = {}) {
+  logsFilterType = section;
+  const sel = document.getElementById("filter-logs-type");
+  if (sel) sel.value = section;
+  currentFilters = { ...currentFilters, logsFilterType: section };
+  try {
+    localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
+  } catch (_e) {
+    /* ignore */
+  }
+  updateAuditSectionUI();
+  if (render) renderLogsTable(rawLogsCache);
+}
 const LOG_DETAIL_PREVIEW_LIMIT = 220;
 
 const CLIENT_STATUS_LABELS = {
@@ -97,7 +137,8 @@ const apiService = {
 };
 
 function switchTab(tabId) {
-  ["resumo", "clientes", "comercial", "suporte", "lancamentos", "logs"].forEach((id) => {
+  const normalizedTab = tabId === "suporte" ? "churn" : tabId;
+  ["resumo", "clientes", "comercial", "churn", "nps", "lancamentos", "logs"].forEach((id) => {
     const view = document.getElementById(`view-${id}`);
     if (view) {
       view.classList.add("hidden");
@@ -105,7 +146,7 @@ function switchTab(tabId) {
       view.style.transform = "translateY(8px)";
     }
   });
-  const active = document.getElementById(`view-${tabId}`);
+  const active = document.getElementById(`view-${normalizedTab}`);
   if (active) {
     active.classList.remove("hidden");
     requestAnimationFrame(() => {
@@ -118,13 +159,13 @@ function switchTab(tabId) {
     btn.classList.remove("bg-mindlaw-gold/10", "border-mindlaw-gold/50");
     btn.classList.add("border-transparent");
   });
-  const selected = document.getElementById(`nav-${tabId}`);
+  const selected = document.getElementById(`nav-${normalizedTab}`);
   if (selected) {
     selected.classList.add("bg-mindlaw-gold/10", "border-mindlaw-gold/50");
     selected.classList.remove("border-transparent");
   }
   closeDrawer();
-  localStorage.setItem("mindlaw_active_tab", tabId);
+  localStorage.setItem("mindlaw_active_tab", normalizedTab);
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
@@ -143,7 +184,7 @@ function toggleFiltersPanel() {
 }
 
 function renderSectionPeriodFilters() {
-  const sections = ["resumo", "clientes", "comercial", "suporte", "lancamentos", "logs"];
+  const sections = ["resumo", "clientes", "comercial", "churn", "nps", "lancamentos", "logs"];
   const monthOpts = `
     <option value="1">Jan</option><option value="2">Fev</option><option value="3">Mar</option>
     <option value="4">Abr</option><option value="5">Mai</option><option value="6">Jun</option>
@@ -187,7 +228,7 @@ function renderSectionPeriodFilters() {
 }
 
 function syncSectionPeriodInputs() {
-  const sections = ["resumo", "clientes", "comercial", "suporte", "lancamentos", "logs"];
+  const sections = ["resumo", "clientes", "comercial", "churn", "nps", "lancamentos", "logs"];
   const fromStart = currentFilters.startDate ? new Date(`${currentFilters.startDate}T00:00:00`) : null;
   const fromEnd = currentFilters.endDate ? new Date(`${currentFilters.endDate}T00:00:00`) : null;
   const startMonth = !fromStart || Number.isNaN(fromStart.getTime()) ? Number(currentFilters.month || new Date().getMonth() + 1) : fromStart.getMonth() + 1;
@@ -206,6 +247,15 @@ function syncSectionPeriodInputs() {
   });
 }
 
+/** YYYY-MM-DD no calendário local (evita deslocar um dia vs `toISOString()` em fusos como America/Sao_Paulo). */
+function formatLocalDateYMD(d) {
+  if (!d || Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 function collectPeriodFiltersFromSection(sectionId) {
   const startMonth = Number(document.getElementById(`period-from-month-${sectionId}`)?.value || 0);
   const startYear = Number(document.getElementById(`period-from-year-${sectionId}`)?.value || 0);
@@ -213,8 +263,8 @@ function collectPeriodFiltersFromSection(sectionId) {
   const endYear = Number(document.getElementById(`period-to-year-${sectionId}`)?.value || 0);
   const start = new Date(startYear, startMonth - 1, 1);
   const end = new Date(endYear, endMonth, 0, 23, 59, 59, 999);
-  const startDate = Number.isNaN(start.getTime()) ? "" : start.toISOString().slice(0, 10);
-  const endDate = Number.isNaN(end.getTime()) ? "" : end.toISOString().slice(0, 10);
+  const startDate = formatLocalDateYMD(start);
+  const endDate = formatLocalDateYMD(end);
   const isSingleMonth = startMonth === endMonth && startYear === endYear;
   return {
     month: isSingleMonth ? String(startMonth) : "",
@@ -435,6 +485,7 @@ function renderComercialCharts(commercial) {
         interactiveFilter = interactiveFilter?.type === "commercialStatus" && interactiveFilter?.value === key
           ? null
           : { type: "commercialStatus", value: key };
+        setLogsAuditSection("comercial", { render: false });
         renderLogsTable(rawLogsCache);
         switchTab("logs");
         toast(interactiveFilter ? `Filtro Comercial: ${selected}` : "Filtro Comercial removido.");
@@ -471,6 +522,7 @@ function renderComercialCharts(commercial) {
         interactiveFilter = interactiveFilter?.type === "commercialReason" && interactiveFilter?.value === key
           ? null
           : { type: "commercialReason", value: key };
+        setLogsAuditSection("comercial", { render: false });
         renderLogsTable(rawLogsCache);
         switchTab("logs");
         toast(interactiveFilter ? `Filtro Comercial (motivo): ${selected}` : "Filtro de motivo comercial removido.");
@@ -746,8 +798,8 @@ function renderClientEntradaPanel(stats) {
 
 function renderSupportCharts(supportDashboard) {
   const monthCount = supportDashboard.churnByMonth || Array.from({ length: 12 }, () => 0);
-  const heatmap = document.getElementById("heatmap");
-  const yearSelect = document.getElementById("support-heatmap-year");
+  const heatmap = document.getElementById("churn-heatmap");
+  const yearSelect = document.getElementById("churn-heatmap-year");
   if (yearSelect) {
     if (!yearSelect.options.length) {
       const nowYear = new Date().getFullYear();
@@ -762,18 +814,20 @@ function renderSupportCharts(supportDashboard) {
   }
   const max = Math.max(...monthCount, 1);
   const monthLabels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-  heatmap.innerHTML = monthCount
-    .map((count, i) => {
-      const ratio = count / max;
-      const r = Math.round(31 + (197 - 31) * ratio);
-      const g = Math.round(20 + (160 - 20) * ratio);
-      const b = Math.round(0 + (89 - 0) * ratio);
-      const bg = `rgb(${r}, ${g}, ${b})`;
-      const textColor = ratio > 0.55 ? "#001A1E" : "#FFFFFF";
-      const activeCls = selectedSupportMonth === i ? "ring-2 ring-mindlaw-gold/80" : "";
-      return `<button type="button" data-support-month="${i}" class="rounded p-2 text-center font-semibold ${activeCls}" style="background: ${bg}; color: ${textColor};">${monthLabels[i]}<br/><span class="text-[10px]">${count}</span></button>`;
-    })
-    .join("");
+  if (heatmap) {
+    heatmap.innerHTML = monthCount
+      .map((count, i) => {
+        const ratio = count / max;
+        const r = Math.round(31 + (197 - 31) * ratio);
+        const g = Math.round(20 + (160 - 20) * ratio);
+        const b = Math.round(0 + (89 - 0) * ratio);
+        const bg = `rgb(${r}, ${g}, ${b})`;
+        const textColor = ratio > 0.55 ? "#001A1E" : "#FFFFFF";
+        const activeCls = selectedSupportMonth === i ? "ring-2 ring-mindlaw-gold/80" : "";
+        return `<button type="button" data-support-month="${i}" class="rounded p-2 text-center font-semibold ${activeCls}" style="background: ${bg}; color: ${textColor};">${monthLabels[i]}<br/><span class="text-[10px]">${count}</span></button>`;
+      })
+      .join("");
+  }
 
   const monthIndex = selectedSupportMonth === null ? monthCount.findIndex((n) => n > 0) : selectedSupportMonth;
   renderSupportMonthDetails(supportDashboard, monthIndex >= 0 ? monthIndex : null);
@@ -826,9 +880,10 @@ function renderSupportCharts(supportDashboard) {
         interactiveFilter = interactiveFilter?.type === "supportNps" && interactiveFilter?.value === key
           ? null
           : { type: "supportNps", value: key };
+        setLogsAuditSection("nps", { render: false });
         renderLogsTable(rawLogsCache);
         switchTab("logs");
-        toast(interactiveFilter ? `Filtro Suporte: ${selected}` : "Filtro Suporte removido.");
+        toast(interactiveFilter ? `Filtro NPS: ${selected}` : "Filtro NPS removido.");
       }
     }
   });
@@ -863,9 +918,10 @@ function renderSupportCharts(supportDashboard) {
           interactiveFilter = interactiveFilter?.type === "supportChurnReason" && interactiveFilter?.value === key
             ? null
             : { type: "supportChurnReason", value: key };
+          setLogsAuditSection("churn", { render: false });
           renderLogsTable(rawLogsCache);
           switchTab("logs");
-          toast(interactiveFilter ? `Filtro Suporte (motivo): ${selected}` : "Filtro de motivo de cancelamento removido.");
+          toast(interactiveFilter ? `Filtro Churn (motivo): ${selected}` : "Filtro de motivo de cancelamento removido.");
         },
         scales: useBar
           ? {
@@ -880,8 +936,8 @@ function renderSupportCharts(supportDashboard) {
 }
 
 function renderSupportMonthDetails(supportDashboard, monthIndex) {
-  const title = document.getElementById("support-month-detail-title");
-  const list = document.getElementById("support-month-detail-list");
+  const title = document.getElementById("churn-month-detail-title");
+  const list = document.getElementById("churn-month-detail-list");
   if (!title || !list) return;
   const monthLabels = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
   if (monthIndex === null || monthIndex < 0) {
@@ -933,34 +989,408 @@ function renderLogDetailCell(detailText, logId) {
   `;
 }
 
-/**
- * Colunas NPS alinhadas à ramificação do Forms: 0–6, 7–8, 9–10 + áreas e comentário extra.
- * Se houver texto na célula (legado/import), a coluna continua visível.
- */
-function npsColunaAtivaParaNota(nota, coluna, temConteudo) {
-  if (temConteudo) return true;
-  const n = Number(nota);
-  if (!Number.isFinite(n) || n < 0 || n > 10) return true;
-  if (coluna === "melhorar") return n <= 6;
-  if (coluna === "faltou") return n >= 7 && n <= 8;
-  if (coluna === "areas" || coluna === "adicional") return true;
-  if (coluna === "experiencia" || coluna === "funcionalidade") return n >= 9;
-  return true;
+/** Mescla npsColunas com campos estruturados do payload quando o mapa vier incompleto (ex.: legado mal parseado). */
+function mergeNpsColunasWithPayload(item) {
+  const c = { ...(item.npsColunas || {}) };
+  const p = item.payload || {};
+  const fill = [
+    ["melhorar", p.npsMelhorarExperiencia],
+    ["faltouNota9", p.npsFaltouNota9],
+    ["areas", p.npsAreasMelhorar],
+    ["experiencia", p.npsExperienciaAteAqui],
+    ["funcionalidade", p.npsFuncionalidadeDiaadia],
+    ["adicional", p.npsComentarioAdicional]
+  ];
+  for (const [key, val] of fill) {
+    const v = val != null ? String(val).trim() : "";
+    const existing = String(c[key] ?? "").trim();
+    if (v && !existing) c[key] = v;
+  }
+  rebalanceNpsColsWithRawClient(c, String(p.comentarioNPS || ""));
+  return c;
 }
 
-function npsColunaTituloInativo(nota, coluna) {
-  const n = Number(nota);
-  const notaTxt = Number.isFinite(n) ? String(n) : "—";
-  if (coluna === "melhorar") {
-    return `Pergunta para notas 0 a 6. Esta resposta tem nota ${notaTxt}.`;
+/** Mesmas etiquetas da API / Apps Script — cortar respostas do texto combinado `comentarioNPS`. */
+const NPS_SEGMENT_LABELS = [
+  ["melhorar", "O que poderíamos melhorar para tornar sua experiência melhor?"],
+  ["faltouNota9", "O que faltou para sua experiência com o MindLaw ser nota 9 ou 10?"],
+  ["areas", "Quais áreas você acredita que ainda podem melhorar?"],
+  ["experiencia", "Como tem sido sua experiência com o MindLaw até aqui?"],
+  ["funcionalidade", "Qual funcionalidade ou diferencial do MindLaw mais ajuda no seu dia a dia?"],
+  ["adicional", "Gostaria de compartilhar mais algum comentário, sugestão ou experiência sobre o MindLaw?"]
+];
+
+function extractSugestaoBlockClient(raw) {
+  const t = String(raw || "").replace(/\r\n/g, "\n").trim();
+  if (!t) return "";
+  let idx = t.lastIndexOf("\nSugestão:");
+  if (idx >= 0) return t.slice(idx + 1).trim();
+  idx = t.lastIndexOf("\nSugestão :");
+  if (idx >= 0) return t.slice(idx + 1).trim();
+  if (/^\s*Sugestão\s*:/i.test(t)) return t;
+  const j = t.search(/(^|\n)\s*Sugestão\s*:/i);
+  if (j >= 0) return t.slice(j).replace(/^\s*\n*/, "").trim();
+  return "";
+}
+
+function extractExperienciaRespostaFromRawClient(raw) {
+  const label =
+    NPS_SEGMENT_LABELS.find(([k]) => k === "experiencia")?.[1] ||
+    "Como tem sido sua experiência com o MindLaw até aqui?";
+  const text = String(raw || "").replace(/\r\n/g, "\n");
+  const i = text.indexOf(label);
+  if (i < 0) return "";
+  let body = text.slice(i + label.length);
+  body = body.replace(/^[\s?:\u2013\u2014\-]+/u, "").replace(/^\n+/, "").trim();
+  if (!body) return "";
+  if (/^Sugestão\s*:/i.test(body)) return "";
+  const stopAt = body.search(/\n\s*(?=Qual funcionalidade|Gostaria de compartilhar|Sugestão\s*:)/i);
+  if (stopAt >= 0) body = body.slice(0, stopAt).trim();
+  const sameLineFix = body.match(/^(.*?)(\s+Sugestão\s*:.*)$/is);
+  if (sameLineFix?.[1]) {
+    const head = sameLineFix[1].trim();
+    if (head && !/^Sugestão\s*:/i.test(head)) return head;
   }
-  if (coluna === "faltou") {
-    return `Pergunta para notas 7 e 8. Esta resposta tem nota ${notaTxt}.`;
+  if (/^Sugestão\s*:/i.test(body)) return "";
+  return body.trim();
+}
+
+/** Espelha lib/npsAudit.rebalanceNpsColumnMap — corrige segmentação quando faltam marcadores no texto salvo. */
+function rebalanceNpsColsWithRawClient(c, rawCom) {
+  if (!c || typeof c !== "object") return;
+  const labelFunc =
+    NPS_SEGMENT_LABELS.find(([k]) => k === "funcionalidade")?.[1] ||
+    "Qual funcionalidade ou diferencial do MindLaw mais ajuda no seu dia a dia?";
+  const raw = String(rawCom || "");
+  let exp = String(c.experiencia ?? "").trim();
+  let func = String(c.funcionalidade ?? "").trim();
+  let ad = String(c.adicional ?? "").trim();
+
+  if (!func && exp.includes(labelFunc)) {
+    const i = exp.indexOf(labelFunc);
+    const before = exp.slice(0, i).replace(/\s+$/, "").trim();
+    let after = exp.slice(i + labelFunc.length).replace(/^[\s:?\n]+/, "").trim();
+    const gIdx = after.search(/\n\nGostaria de compartilhar/i);
+    if (gIdx >= 0) {
+      const tail = after.slice(gIdx).trim();
+      after = after.slice(0, gIdx).trim();
+      if (tail) ad = ad ? `${ad}\n\n${tail}` : tail;
+    }
+    const sIdx = after.search(/\n\s*Sugestão\s*:/i);
+    if (sIdx >= 0) {
+      const st = after.slice(sIdx).trim();
+      after = after.slice(0, sIdx).trim();
+      if (st) ad = ad ? `${ad}\n\n${st}` : st;
+    }
+    func = after.trim();
+    exp = before;
   }
-  if (coluna === "experiencia" || coluna === "funcionalidade") {
-    return `Pergunta para notas 9 e 10. Esta resposta tem nota ${notaTxt}.`;
+
+  const sugInExp = exp.search(/\n\s*Sugestão\s*:/i);
+  if (sugInExp >= 0) {
+    const tail = exp.slice(sugInExp).replace(/^\s*\n*/, "").trim();
+    exp = exp.slice(0, sugInExp).trim();
+    if (tail) ad = ad ? `${ad}\n\n${tail}` : tail;
   }
-  return "Não aplicável a esta faixa de nota.";
+  const oneLineSug = exp.match(/^([\s\S]*?)(\s+Sugestão\s*:[\s\S]*)$/i);
+  if (oneLineSug?.[2]) {
+    exp = oneLineSug[1].trim();
+    const tail = oneLineSug[2].trim();
+    if (tail) ad = ad ? `${ad}\n\n${tail}` : tail;
+  }
+  if (/^\s*Sugestão\s*:/i.test(exp)) {
+    ad = ad ? `${ad}\n\n${exp.trim()}` : exp.trim();
+    exp = "";
+  }
+  if (!ad) {
+    ad = extractAdicionalFuzzyClient(raw) || extractSugestaoBlockClient(raw) || "";
+  }
+
+  const labelExp =
+    NPS_SEGMENT_LABELS.find(([k]) => k === "experiencia")?.[1] ||
+    "Como tem sido sua experiência com o MindLaw até aqui?";
+  if (normalizeText(exp) === normalizeText(labelExp)) exp = "";
+  if (exp && ad && normalizeText(exp) === normalizeText(ad)) exp = "";
+
+  if (raw) {
+    const rec = extractExperienciaRespostaFromRawClient(raw);
+    if (rec && !/^Sugestão\s*:/i.test(rec.trim())) {
+      const ne = normalizeText(exp);
+      const nr = normalizeText(rec);
+      const useRecover =
+        !exp ||
+        /^Sugestão\s*:/i.test(exp) ||
+        ne === normalizeText(labelExp) ||
+        (ad && (ne === normalizeText(ad) || exp.trim() === ad.trim()));
+      if (useRecover && (!exp || ne !== nr)) exp = rec.trim();
+    }
+  }
+
+  c.experiencia = exp.trim();
+  c.funcionalidade = func.trim();
+  c.adicional = ad.trim();
+}
+
+function segmentComentarioNpsByMarkersClient(raw) {
+  const text = String(raw || "").replace(/\r\n/g, "\n");
+  const positions = [];
+  for (const [key, label] of NPS_SEGMENT_LABELS) {
+    const idx = key === "adicional" ? text.lastIndexOf(label) : text.indexOf(label);
+    if (idx >= 0) positions.push({ key, idx, len: label.length });
+  }
+  if (!positions.length) return {};
+  positions.sort((a, b) => a.idx - b.idx);
+  const out = {};
+  for (let i = 0; i < positions.length; i++) {
+    const start = positions[i].idx + positions[i].len;
+    const end = i + 1 < positions.length ? positions[i + 1].idx : text.length;
+    let val = text.slice(start, end).replace(/^[\s\n:;.,\-–—]+/u, "").trim();
+    if (val) out[positions[i].key] = val;
+  }
+  return out;
+}
+
+/** Blocos legados pergunta \\n resposta (fallback quando não há string completa da pergunta no texto). */
+function parseLegacyQuestionBlocksClient(comentarioNPS) {
+  const out = {
+    melhorar: "",
+    faltouNota9: "",
+    areas: "",
+    experiencia: "",
+    funcionalidade: "",
+    adicional: ""
+  };
+  const raw = String(comentarioNPS || "").trim();
+  if (!raw) return out;
+  const chunks = raw.split(/\n\n+/);
+  for (const chunk of chunks) {
+    const lines = chunk.split("\n");
+    const q = String(lines[0] || "").trim();
+    const a = lines.slice(1).join("\n").trim();
+    if (!q || !a) continue;
+    const nq = normalizeText(q);
+    if (nq.includes("poderiamos") && nq.includes("melhorar") && nq.includes("experiencia")) out.melhorar = a;
+    else if (nq.includes("principal motivo")) out.melhorar = a;
+    else if (nq.includes("faltou") && nq.includes("nota") && nq.includes("9")) out.faltouNota9 = a;
+    else if (nq.includes("areas") && nq.includes("melhorar")) out.areas = a;
+    else if (
+      (nq.includes("como tem sido") && nq.includes("experiencia") && nq.includes("mindlaw")) ||
+      (nq.includes("experiencia") && nq.includes("mindlaw") && nq.includes("ate aqui"))
+    )
+      out.experiencia = a;
+    else if (nq.includes("funcionalidade") && nq.includes("mindlaw")) out.funcionalidade = a;
+    else if (nq.includes("gostaria") && nq.includes("compartilhar") && (nq.includes("comentario") || nq.includes("comentarios")))
+      out.adicional = a;
+  }
+  return out;
+}
+
+function classifyNpsQuestionLineKeyClient(line) {
+  const t = normalizeText(line);
+  if (!t) return null;
+  if (t.includes("gostaria") && t.includes("compartilhar")) return "adicional";
+  if (t.includes("qual funcionalidade") && t.includes("mindlaw")) return "funcionalidade";
+  if (t.includes("como tem sido") && t.includes("mindlaw")) return "experiencia";
+  if (t.includes("quais areas") && t.includes("melhorar")) return "areas";
+  if (t.includes("o que faltou") && t.includes("9") && t.includes("10")) return "faltouNota9";
+  if ((t.includes("o que poderiamos") || t.includes("o que poderamos")) && t.includes("melhorar")) return "melhorar";
+  if (t.includes("principal motivo") && t.includes("nota")) return "melhorar";
+  return null;
+}
+
+/** Extrai blocos do `comentarioNPS` linha a linha (alinhado a `lib/npsAudit.parseNpsFormBlocksFromRaw`). */
+function parseNpsFormBlocksFromRawClient(raw) {
+  const out = {
+    melhorar: "",
+    faltouNota9: "",
+    areas: "",
+    experiencia: "",
+    funcionalidade: "",
+    adicional: ""
+  };
+  const text = String(raw || "").replace(/\r\n/g, "\n").trim();
+  if (!text) return out;
+  const lines = text.split("\n");
+  let cur = null;
+  const buf = [];
+  const flush = () => {
+    if (!cur || !buf.length) return;
+    const s = buf.join("\n").trim();
+    if (s && !out[cur]) out[cur] = s;
+    buf.length = 0;
+  };
+  const assignVal = (key, val) => {
+    const s = String(val || "").trim();
+    if (s && !out[key]) out[key] = s;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const same = line.match(/^(.+?\?|.+?？)\s+(.+)$/);
+    if (same) {
+      const qk = classifyNpsQuestionLineKeyClient(same[1]);
+      if (qk && String(same[2]).trim()) {
+        flush();
+        assignVal(qk, same[2]);
+        cur = null;
+        continue;
+      }
+    }
+    const nk = classifyNpsQuestionLineKeyClient(line);
+    if (nk) {
+      flush();
+      cur = nk;
+    } else if (cur) {
+      buf.push(line);
+    }
+  }
+  flush();
+  return out;
+}
+
+/** Replica buildLegacyCombinedComentario_ do Google Apps Script (texto único salvo em `comentarioNPS`). */
+function buildLegacyCombinedComentarioFromFields(f) {
+  const blocks = [
+    ["O que poderíamos melhorar para tornar sua experiência melhor?", f.npsMelhorarExperiencia],
+    ["O que faltou para sua experiência com o MindLaw ser nota 9 ou 10?", f.npsFaltouNota9],
+    ["Quais áreas você acredita que ainda podem melhorar?", f.npsAreasMelhorar],
+    ["Como tem sido sua experiência com o MindLaw até aqui?", f.npsExperienciaAteAqui],
+    ["Qual funcionalidade ou diferencial do MindLaw mais ajuda no seu dia a dia?", f.npsFuncionalidadeDiaadia],
+    ["Gostaria de compartilhar mais algum comentário, sugestão ou experiência sobre o MindLaw?", f.npsComentarioAdicional]
+  ];
+  const parts = [];
+  for (let i = 0; i < blocks.length; i++) {
+    const q = blocks[i][0];
+    const a = String(blocks[i][1] || "").trim();
+    if (a) parts.push(`${q}\n${a}`);
+  }
+  return parts.join("\n\n").slice(0, 10000);
+}
+
+function getNpsEditResolvedFields(item) {
+  const p = item.payload || {};
+  const merged = mergeNpsColunasWithPayload(item);
+  const raw = String(p.comentarioNPS || "").trim();
+  const seg = raw ? segmentComentarioNpsByMarkersClient(raw) : {};
+  const legacy = raw ? parseLegacyQuestionBlocksClient(raw) : {};
+  const lineBlocks = raw ? parseNpsFormBlocksFromRawClient(raw) : {};
+  const keys = [
+    ["melhorar", "npsMelhorarExperiencia"],
+    ["faltouNota9", "npsFaltouNota9"],
+    ["areas", "npsAreasMelhorar"],
+    ["experiencia", "npsExperienciaAteAqui"],
+    ["funcionalidade", "npsFuncionalidadeDiaadia"],
+    ["adicional", "npsComentarioAdicional"]
+  ];
+  const out = {};
+  for (const [cKey, pKey] of keys) {
+    let v = String(p[pKey] || "").trim();
+    if (!v) v = String(merged[cKey] || "").trim();
+    if (!v) v = String(seg[cKey] || "").trim();
+    if (!v) v = String(legacy[cKey] || "").trim();
+    if (!v) v = String(lineBlocks[cKey] || "").trim();
+    out[pKey] = v;
+  }
+  if (!out.npsComentarioAdicional && raw) {
+    const fuzzy = extractAdicionalFuzzyClient(raw);
+    if (fuzzy) out.npsComentarioAdicional = fuzzy;
+    else {
+      const sug = extractSugestaoBlockClient(raw);
+      if (sug) out.npsComentarioAdicional = sug;
+    }
+  }
+  return out;
+}
+
+/** Mesma ordem do Google Forms / Apps Script — texto para a coluna única da auditoria NPS. */
+const NPS_FORM_DISPLAY_PAIRS = [
+  ["O que poderíamos melhorar para tornar sua experiência melhor?", "npsMelhorarExperiencia"],
+  ["O que faltou para sua experiência com o MindLaw ser nota 9 ou 10?", "npsFaltouNota9"],
+  ["Quais áreas você acredita que ainda podem melhorar?", "npsAreasMelhorar"],
+  ["Como tem sido sua experiência com o MindLaw até aqui?", "npsExperienciaAteAqui"],
+  ["Qual funcionalidade ou diferencial do MindLaw mais ajuda no seu dia a dia?", "npsFuncionalidadeDiaadia"],
+  ["Gostaria de compartilhar mais algum comentário, sugestão ou experiência sobre o MindLaw?", "npsComentarioAdicional"]
+];
+
+function buildNpsRespostasColunaUnica(item) {
+  const r = getNpsEditResolvedFields(item);
+  const parts = [];
+  for (const [pergunta, key] of NPS_FORM_DISPLAY_PAIRS) {
+    const a = String(r[key] ?? "").trim();
+    if (a) parts.push(`${pergunta}\n${a}`);
+  }
+  let out = parts.join("\n\n").trim();
+  if (!out) {
+    const raw = String(item.payload?.comentarioNPS ?? item.detalhe ?? "").trim();
+    if (raw && raw !== "-") out = raw;
+  }
+  return out;
+}
+
+function npsRespostasFormularioCell(item) {
+  const text = buildNpsRespostasColunaUnica(item);
+  return text
+    ? `<td class="px-4 py-4 align-top text-xs max-w-xl"><div class="whitespace-pre-wrap text-mindlaw-white/90">${renderLogDetailCell(text, `${item.id}-nps-form`)}</div></td>`
+    : `<td class="px-4 py-4 align-top text-xs text-mindlaw-white/50">—</td>`;
+}
+
+/** Atualiza o textarea de pré-visualização do `comentarioNPS` ao digitar nos seis campos NPS. */
+function wireNpsEditCombinedPreviewListeners() {
+  const preview = document.getElementById("log_edit_comentario_nps_preview");
+  if (!preview) return;
+  const fieldIds = [
+    "log_edit_nps_melhorar",
+    "log_edit_nps_faltou",
+    "log_edit_nps_areas",
+    "log_edit_nps_experiencia",
+    "log_edit_nps_funcionalidade",
+    "log_edit_nps_adicional"
+  ];
+  const sync = () => {
+    const el = document.getElementById("log_edit_comentario_nps_preview");
+    if (!el) return;
+    el.value = buildLegacyCombinedComentarioFromFields({
+      npsMelhorarExperiencia: document.getElementById("log_edit_nps_melhorar")?.value ?? "",
+      npsFaltouNota9: document.getElementById("log_edit_nps_faltou")?.value ?? "",
+      npsAreasMelhorar: document.getElementById("log_edit_nps_areas")?.value ?? "",
+      npsExperienciaAteAqui: document.getElementById("log_edit_nps_experiencia")?.value ?? "",
+      npsFuncionalidadeDiaadia: document.getElementById("log_edit_nps_funcionalidade")?.value ?? "",
+      npsComentarioAdicional: document.getElementById("log_edit_nps_adicional")?.value ?? ""
+    });
+  };
+  for (const id of fieldIds) document.getElementById(id)?.addEventListener("input", sync);
+}
+
+/** Espelho da lógica do servidor para comentário extra: texto combinado truncado ou legado sem campo estruturado. */
+function extractAdicionalFuzzyClient(raw) {
+  const text = String(raw || "").replace(/\r\n/g, "\n");
+  const LABEL =
+    "Gostaria de compartilhar mais algum comentário, sugestão ou experiência sobre o MindLaw?";
+  const anchors = [
+    LABEL,
+    "Gostaria de compartilhar mais algum comentário",
+    "Gostaria de compartilhar mais algum comentario",
+    "Gostaria de compartilhar"
+  ];
+  let startQ = -1;
+  let anchorLen = 0;
+  for (let i = 0; i < anchors.length; i++) {
+    const a = anchors[i];
+    const idx = text.lastIndexOf(a);
+    if (idx >= 0) {
+      startQ = idx;
+      anchorLen = a.length;
+      break;
+    }
+  }
+  if (startQ < 0) return "";
+  const afterAnchor = text.slice(startQ + anchorLen);
+  const relQ = afterAnchor.indexOf("?");
+  const bodyStart = relQ >= 0 ? startQ + anchorLen + relQ + 1 : startQ + anchorLen;
+  let body = text.slice(bodyStart).replace(/^[\s\n:;.,\-–—]+/u, "").trim();
+  const nextBlock = /\n\n(?=O que poderíamos|O que faltou|Quais áreas|Como tem sido|Qual funcionalidade|Gostaria de compartilhar)/;
+  const cut = body.search(nextBlock);
+  if (cut > 0) body = body.slice(0, cut).trim();
+  return body;
 }
 
 function mapPlanToOption(plano) {
@@ -1035,14 +1465,91 @@ function toggleFormFields(tipo) {
   updateFuncionalidadeFieldVisibility("churn");
 }
 
+function renderLogsTheadRow(auditMode) {
+  const tr = document.getElementById("logs-thead-row");
+  if (!tr) return;
+  const th = (label, extraClass = "") => `<th class="px-4 py-3 ${extraClass}">${label}</th>`;
+  if (auditMode === "nps") {
+    tr.innerHTML = `${th("Tipo")}${th("Cliente")}${th("Plano")}${th("Data")}${th("Categoria NPS")}${th("Nota")}${th("Detalhe")}<th class="max-w-xl px-4 py-3 text-left text-xs font-semibold" title="Todas as perguntas do formulário, na ordem">Respostas ao formulário</th>${th("Ações")}`;
+    return;
+  }
+  if (auditMode === "comercial") {
+    tr.innerHTML = `${th("Tipo")}${th("Cliente")}${th("Plano")}${th("Data")}${th("Status")}${th("Valor")}${th("Motivo da perda")}${th("Detalhe / observações")}${th("Ações")}`;
+    return;
+  }
+  tr.innerHTML = `${th("Tipo")}${th("Cliente")}${th("Plano")}${th("Data cancel.")}${th("Motivo")}${th("Valor perdido")}${th("Observações")}${th("Ações")}`;
+}
+
+function logActionsCell(item) {
+  return `<td class="px-4 py-4">
+    <div class="flex items-center gap-2">
+          <button class="rounded-lg border border-white/20 px-3 py-1 text-xs hover:border-mindlaw-gold/60" data-edit-log-id="${escapeHtml(item.id)}" data-edit-log-origem="${escapeHtml(item.origem)}">Editar</button>
+          <button class="rounded-lg border border-rose-400/40 px-3 py-1 text-xs text-rose-200 hover:border-rose-300/70" data-delete-log-id="${escapeHtml(item.id)}" data-delete-log-origem="${escapeHtml(item.origem)}">Apagar</button>
+    </div>
+  </td>`;
+}
+
+function buildLogDataRow(item, auditMode, statusClassFn) {
+  const p = item.payload || {};
+  const clientCell = `<td class="px-4 py-4"><button class="text-left hover:text-mindlaw-gold/90 hover:underline" data-client-link="${escapeHtml(item.cliente || "")}">${item.cliente || "-"}</button></td>`;
+  const dataStr = item.data ? new Date(item.data).toLocaleDateString("pt-BR") : "-";
+  if (auditMode === "comercial") {
+    const valor = money(p.valorContrato ?? 0);
+    const motivo = escapeHtml(p.motivoPerda || "—");
+    return `<tr>
+      <td class="px-4 py-4">${escapeHtml(item.tipo)}</td>
+      ${clientCell}
+      <td class="px-4 py-4">${item.plano || "Sem plano"}</td>
+      <td class="px-4 py-4">${dataStr}</td>
+      <td class="px-4 py-4"><span class="status-chip ${statusClassFn(item.status, item.tipo)}">${escapeHtml(item.status || "-")}</span></td>
+      <td class="px-4 py-4 font-mono">${valor}</td>
+      <td class="px-4 py-4 text-xs">${motivo}</td>
+      <td class="px-4 py-4 align-top text-xs">${renderLogDetailCell(item.detalhe || "-", item.id)}</td>
+      ${logActionsCell(item)}
+    </tr>`;
+  }
+  if (auditMode === "churn") {
+    const valor = money(p.valorPerdido ?? 0);
+    const motivo = escapeHtml(p.motivoPrincipal || "—");
+    return `<tr>
+      <td class="px-4 py-4">${escapeHtml(item.tipo)}</td>
+      ${clientCell}
+      <td class="px-4 py-4">${item.plano || "Sem plano"}</td>
+      <td class="px-4 py-4">${dataStr}</td>
+      <td class="px-4 py-4 text-xs">${motivo}</td>
+      <td class="px-4 py-4 font-mono">${valor}</td>
+      <td class="px-4 py-4 align-top text-xs">${renderLogDetailCell(item.detalhe || "-", item.id)}</td>
+      ${logActionsCell(item)}
+    </tr>`;
+  }
+  const isNps = normalizeText(item.origem) === "nps";
+  const notaCell = isNps && item.npsNota != null && item.npsNota !== "" ? escapeHtml(String(item.npsNota)) : "—";
+  const detalheCell = isNps ? "—" : renderLogDetailCell(item.detalhe || "-", item.id);
+  const npsRespostasTd = isNps ? npsRespostasFormularioCell(item) : `<td class="px-4 py-4 align-top text-xs text-mindlaw-white/50">—</td>`;
+  return `<tr>
+      <td class="px-4 py-4">${escapeHtml(item.tipo)}</td>
+      ${clientCell}
+      <td class="px-4 py-4">${item.plano || "Sem plano"}</td>
+      <td class="px-4 py-4">${dataStr}</td>
+      <td class="px-4 py-4"><span class="status-chip ${statusClassFn(item.status, item.tipo)}">${escapeHtml(item.status || "-")}</span></td>
+      <td class="px-4 py-4 font-mono">${notaCell}</td>
+      <td class="px-4 py-4 align-top">${detalheCell}</td>
+      ${npsRespostasTd}
+      ${logActionsCell(item)}
+    </tr>`;
+}
+
 function renderLogsTable(logs) {
+  const auditMode = getEffectiveLogsAuditMode();
+  renderLogsTheadRow(auditMode);
+  const colspan = auditMode === "nps" ? 9 : 8;
   const source = Array.isArray(logs) ? logs : [];
   let filtered = source;
   if (interactiveFilter?.type === "commercialStatus") {
-    filtered = source.filter((item) => normalizeText(item.tipo) === "comercial" && normalizeText(item.status) === interactiveFilter.value);
+    filtered = filtered.filter((item) => normalizeText(item.tipo) === "comercial" && normalizeText(item.status) === interactiveFilter.value);
   }
   if (interactiveFilter?.type === "supportNps") {
-    filtered = source.filter((item) => normalizeText(item.tipo) === "nps" && normalizeText(item.status).includes(interactiveFilter.value));
+    filtered = filtered.filter((item) => normalizeText(item.tipo) === "nps" && normalizeText(item.status).includes(interactiveFilter.value));
   }
   if (interactiveFilter?.type === "commercialReason") {
     filtered = filtered.filter((item) => {
@@ -1056,9 +1563,7 @@ function renderLogsTable(logs) {
       return normalizeText(item.payload?.motivoPrincipal || item.detalhe || "").includes(interactiveFilter.value);
     });
   }
-  if (logsFilterType) {
-    filtered = filtered.filter((item) => normalizeText(item.origem) === normalizeText(logsFilterType));
-  }
+  filtered = filtered.filter((item) => normalizeText(item.origem) === auditMode);
   if (logsFilterPlan) {
     filtered = filtered.filter((item) => {
       const raw = normalizeText(item.plano || "");
@@ -1073,12 +1578,24 @@ function renderLogsTable(logs) {
     const term = normalizeText(logsSearchTerm);
     filtered = filtered.filter((item) => {
       if (normalizeText(item.cliente).includes(term) || normalizeText(item.detalhe).includes(term)) return true;
-      if (String(item.origem) === "nps" && item.npsColunas) {
-        const blob = Object.values(item.npsColunas).join(" ");
-        if (normalizeText(blob).includes(term)) return true;
+      const p = item.payload || {};
+      if (auditMode === "comercial") {
+        if (normalizeText(String(p.valorContrato ?? "")).includes(term)) return true;
+        if (normalizeText(p.motivoPerda || "").includes(term)) return true;
+        if (normalizeText(p.competidor || "").includes(term)) return true;
+      }
+      if (auditMode === "churn") {
+        if (normalizeText(p.motivoPrincipal || "").includes(term)) return true;
+        if (normalizeText(String(p.valorPerdido ?? "")).includes(term)) return true;
+      }
+      if (auditMode === "nps" && String(item.origem) === "nps" && (item.npsColunas || item.payload?.registerType === "nps")) {
+        const uni = buildNpsRespostasColunaUnica(item);
+        if (normalizeText(uni).includes(term)) return true;
+        const rawCom = String(p.comentarioNPS ?? "").trim();
+        if (rawCom && normalizeText(rawCom).includes(term)) return true;
       }
       const notaStr = item.npsNota != null && item.npsNota !== "" ? String(item.npsNota) : "";
-      if (notaStr && normalizeText(notaStr).includes(term)) return true;
+      if (auditMode === "nps" && notaStr && normalizeText(notaStr).includes(term)) return true;
       return false;
     });
   }
@@ -1094,35 +1611,12 @@ function renderLogsTable(logs) {
     return "status-negociacao";
   };
 
-  const npsAuditCells = (item) => {
-    const c = item.npsColunas || {};
-    const nota = item.npsNota;
-    const mk = (coluna, texto, suffix) => {
-      const bruto = String(texto || "").trim();
-      const temConteudo = Boolean(bruto);
-      const ativa = npsColunaAtivaParaNota(nota, coluna, temConteudo);
-      if (!ativa) {
-        const title = escapeHtml(npsColunaTituloInativo(nota, coluna));
-        return `<td class="px-3 py-4 align-top text-xs max-w-[200px] text-mindlaw-white/35 bg-mindlaw-dark/30" title="${title}"><span class="select-none">—</span></td>`;
-      }
-      return `<td class="px-3 py-4 align-top text-xs max-w-[200px]">${renderLogDetailCell(temConteudo ? bruto : "—", `${item.id}-${suffix}`)}</td>`;
-    };
-    return (
-      mk("melhorar", c.melhorar, "melhorar") +
-      mk("faltou", c.faltouNota9, "faltou") +
-      mk("areas", c.areas, "areas") +
-      mk("experiencia", c.experiencia, "exp") +
-      mk("funcionalidade", c.funcionalidade, "func") +
-      mk("adicional", c.adicional, "adic")
-    );
-  };
-
   const interactiveFilterEl = document.getElementById("logs-active-interactive-filter");
   const filterLabelMap = {
     commercialStatus: "Comercial · Status",
-    supportNps: "Suporte · NPS",
+    supportNps: "NPS · Categoria",
     commercialReason: "Comercial · Motivo",
-    supportChurnReason: "Suporte · Motivo de cancelamento"
+    supportChurnReason: "Churn · Motivo"
   };
   const filterClassMap = {
     commercialStatus: "border-sky-300/60 bg-sky-400/10",
@@ -1149,33 +1643,9 @@ function renderLogsTable(logs) {
 
   const body = document.getElementById("logs-table");
   body.innerHTML = filtered.length
-    ? filtered.map((item) => {
-      const isNps = normalizeText(item.origem) === "nps";
-      const notaCell = isNps && item.npsNota != null && item.npsNota !== "" ? escapeHtml(String(item.npsNota)) : "—";
-      const detalheCell = isNps
-        ? "—"
-        : renderLogDetailCell(item.detalhe || "-", item.id);
-      const dashSix =
-        '<td class="px-3 py-4 align-top text-xs text-mindlaw-white/50">—</td>'.repeat(6);
-      const npsRow = isNps ? npsAuditCells(item) : dashSix;
-      return `<tr>
-      <td class="px-4 py-4">${item.tipo}</td>
-      <td class="px-4 py-4"><button class="text-left hover:text-mindlaw-gold/90 hover:underline" data-client-link="${escapeHtml(item.cliente || "")}">${item.cliente || "-"}</button></td>
-      <td class="px-4 py-4">${item.plano || "Sem plano"}</td>
-      <td class="px-4 py-4">${item.data ? new Date(item.data).toLocaleDateString("pt-BR") : "-"}</td>
-      <td class="px-4 py-4"><span class="status-chip ${statusClass(item.status, item.tipo)}">${item.status || "-"}</span></td>
-      <td class="px-4 py-4 font-mono">${notaCell}</td>
-      <td class="px-4 py-4 align-top">${detalheCell}</td>
-      ${npsRow}
-      <td class="px-4 py-4">
-        <div class="flex items-center gap-2">
-          <button class="rounded-lg border border-white/20 px-3 py-1 text-xs hover:border-mindlaw-gold/60" data-edit-log-id="${escapeHtml(item.id)}" data-edit-log-origem="${escapeHtml(item.origem)}">Editar</button>
-          <button class="rounded-lg border border-rose-400/40 px-3 py-1 text-xs text-rose-200 hover:border-rose-300/70" data-delete-log-id="${escapeHtml(item.id)}" data-delete-log-origem="${escapeHtml(item.origem)}">Apagar</button>
-        </div>
-      </td>
-    </tr>`;
-    }).join("")
-    : `<tr><td colspan="14" class="px-6 py-6 text-center text-mindlaw-white/70">Sem registros.</td></tr>`;
+    ? filtered.map((item) => buildLogDataRow(item, auditMode, statusClass)).join("")
+    : `<tr><td colspan="${colspan}" class="px-6 py-6 text-center text-mindlaw-white/70">Sem registros nesta visão.</td></tr>`;
+  updateAuditSectionUI();
 }
 
 function openLogEditModal(item) {
@@ -1241,7 +1711,9 @@ function openLogEditModal(item) {
     document.getElementById("log_edit_plano").value = mapPlanToOption(relatedClient?.plano || "");
   } else {
     const p = item.payload || {};
+    const r = getNpsEditResolvedFields(item);
     const t = (v) => escapeHtml(String(v ?? ""));
+    const combinedPreview = buildLegacyCombinedComentarioFromFields(r);
     container.innerHTML = `
       <input id="log_edit_cliente" class="input-ui" type="text" placeholder="Cliente" value="${t(p.cliente)}" />
       <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
@@ -1249,13 +1721,17 @@ function openLogEditModal(item) {
         <input id="log_edit_nota_nps" class="input-ui" type="number" min="0" max="10" value="${t(p.notaNPS)}" />
       </div>
       <p class="text-xs text-mindlaw-white/60">Respostas por pergunta (NPS)</p>
-      <textarea id="log_edit_nps_melhorar" class="input-ui" rows="2" placeholder="O que poderíamos melhorar... (0–6)">${t(p.npsMelhorarExperiencia)}</textarea>
-      <textarea id="log_edit_nps_faltou" class="input-ui" rows="2" placeholder="O que faltou para nota 9–10... (7–8)">${t(p.npsFaltouNota9)}</textarea>
-      <textarea id="log_edit_nps_areas" class="input-ui" rows="2" placeholder="Áreas a melhorar">${t(p.npsAreasMelhorar)}</textarea>
-      <textarea id="log_edit_nps_experiencia" class="input-ui" rows="2" placeholder="Experiência até aqui (9–10)">${t(p.npsExperienciaAteAqui)}</textarea>
-      <textarea id="log_edit_nps_funcionalidade" class="input-ui" rows="2" placeholder="Funcionalidade / diferencial (9–10)">${t(p.npsFuncionalidadeDiaadia)}</textarea>
-      <textarea id="log_edit_nps_adicional" class="input-ui" rows="2" placeholder="Comentário adicional (sempre)">${t(p.npsComentarioAdicional)}</textarea>
-      <textarea id="log_edit_comentario_nps" class="input-ui" rows="2" placeholder="Texto combinado legado (opcional)">${t(p.comentarioNPS)}</textarea>
+      <textarea id="log_edit_nps_melhorar" class="input-ui" rows="2" placeholder="O que poderíamos melhorar... (0–6)">${t(r.npsMelhorarExperiencia)}</textarea>
+      <textarea id="log_edit_nps_faltou" class="input-ui" rows="2" placeholder="O que faltou para nota 9–10... (7–8)">${t(r.npsFaltouNota9)}</textarea>
+      <textarea id="log_edit_nps_areas" class="input-ui" rows="2" placeholder="Áreas a melhorar">${t(r.npsAreasMelhorar)}</textarea>
+      <textarea id="log_edit_nps_experiencia" class="input-ui" rows="2" placeholder="Experiência até aqui (9–10)">${t(r.npsExperienciaAteAqui)}</textarea>
+      <textarea id="log_edit_nps_funcionalidade" class="input-ui" rows="2" placeholder="Funcionalidade / diferencial (9–10)">${t(r.npsFuncionalidadeDiaadia)}</textarea>
+      <textarea id="log_edit_nps_adicional" class="input-ui" rows="3" placeholder="Comentário adicional (última pergunta do formulário)">${t(r.npsComentarioAdicional)}</textarea>
+      <details class="mt-2 rounded-lg border border-white/10 bg-mindlaw-teal/30 p-3">
+        <summary class="cursor-pointer text-xs font-medium text-mindlaw-white/75">Texto combinado salvo no registro (pré-visualização)</summary>
+        <p class="mt-2 text-[10px] leading-relaxed text-mindlaw-white/50">Atualiza enquanto você edita os campos acima; o mesmo texto será salvo em <code class="rounded bg-white/10 px-1">comentarioNPS</code> ao confirmar (formato da integração Google Forms).</p>
+        <textarea readonly id="log_edit_comentario_nps_preview" class="input-ui mt-2 max-h-48 text-xs" rows="5">${t(combinedPreview)}</textarea>
+      </details>
       <select id="log_edit_plano" class="input-ui">
         <option value="">Sem plano</option>
         <option value="Starter">Starter</option>
@@ -1266,6 +1742,7 @@ function openLogEditModal(item) {
     `;
     const relatedClient = currentClientRawList.find((c) => normalizeText(c?.nome) === normalizeText(p.cliente));
     document.getElementById("log_edit_plano").value = mapPlanToOption(relatedClient?.plano || "");
+    wireNpsEditCombinedPreviewListeners();
   }
   document.getElementById("log_edit_motivo_perda")?.addEventListener("change", (event) => {
     const show = isMotivoComDetalhamento(event.target.value);
@@ -1321,18 +1798,32 @@ async function saveLogEdit() {
       plano: document.getElementById("log_edit_plano")?.value || ""
     });
   } else if (editingLog.origem === "nps") {
+    const npsMelhorarExperiencia = document.getElementById("log_edit_nps_melhorar")?.value?.trim() || "";
+    const npsFaltouNota9 = document.getElementById("log_edit_nps_faltou")?.value?.trim() || "";
+    const npsAreasMelhorar = document.getElementById("log_edit_nps_areas")?.value?.trim() || "";
+    const npsExperienciaAteAqui = document.getElementById("log_edit_nps_experiencia")?.value?.trim() || "";
+    const npsFuncionalidadeDiaadia = document.getElementById("log_edit_nps_funcionalidade")?.value?.trim() || "";
+    const npsComentarioAdicional = document.getElementById("log_edit_nps_adicional")?.value?.trim() || "";
+    const comentarioNPS = buildLegacyCombinedComentarioFromFields({
+      npsMelhorarExperiencia,
+      npsFaltouNota9,
+      npsAreasMelhorar,
+      npsExperienciaAteAqui,
+      npsFuncionalidadeDiaadia,
+      npsComentarioAdicional
+    });
     await apiService.updateSupport(editingLog.id, {
       registerType: "nps",
       cliente: document.getElementById("log_edit_cliente").value.trim(),
       dataNPS: document.getElementById("log_edit_data_nps").value || null,
       notaNPS: document.getElementById("log_edit_nota_nps").value,
-      comentarioNPS: document.getElementById("log_edit_comentario_nps").value.trim(),
-      npsMelhorarExperiencia: document.getElementById("log_edit_nps_melhorar")?.value?.trim() || "",
-      npsFaltouNota9: document.getElementById("log_edit_nps_faltou")?.value?.trim() || "",
-      npsAreasMelhorar: document.getElementById("log_edit_nps_areas")?.value?.trim() || "",
-      npsExperienciaAteAqui: document.getElementById("log_edit_nps_experiencia")?.value?.trim() || "",
-      npsFuncionalidadeDiaadia: document.getElementById("log_edit_nps_funcionalidade")?.value?.trim() || "",
-      npsComentarioAdicional: document.getElementById("log_edit_nps_adicional")?.value?.trim() || "",
+      comentarioNPS,
+      npsMelhorarExperiencia,
+      npsFaltouNota9,
+      npsAreasMelhorar,
+      npsExperienciaAteAqui,
+      npsFuncionalidadeDiaadia,
+      npsComentarioAdicional,
       plano: document.getElementById("log_edit_plano")?.value || ""
     });
   } else {
@@ -1676,7 +2167,7 @@ function collectFilters() {
     clientSegment: document.getElementById("filter-client-segment")?.value || "",
     sortBy: document.getElementById("filter-client-sort-by")?.value || "cadastro",
     sortDir: document.getElementById("filter-client-sort-dir")?.value || "desc",
-    churnYear: document.getElementById("support-heatmap-year")?.value || String(currentFilters.churnYear || new Date().getFullYear()),
+    churnYear: document.getElementById("churn-heatmap-year")?.value || String(currentFilters.churnYear || new Date().getFullYear()),
     logsFilterType: document.getElementById("filter-logs-type")?.value || logsFilterType || "",
     logsFilterPlan: document.getElementById("filter-logs-plan")?.value || logsFilterPlan || "",
     logsSearchTerm: document.getElementById("filter-logs-search")?.value || logsSearchTerm || ""
@@ -1743,7 +2234,8 @@ function restoreFilters() {
     clientsSearchTerm = searchInput.value;
   }
   currentFilters.churnYear = parsed.churnYear || String(new Date().getFullYear());
-  logsFilterType = parsed.logsFilterType || "";
+  logsFilterType = parsed.logsFilterType || "nps";
+  if (!["comercial", "churn", "nps"].includes(logsFilterType)) logsFilterType = "nps";
   logsFilterPlan = parsed.logsFilterPlan || "";
   logsSearchTerm = parsed.logsSearchTerm || "";
   const logsTypeSel = document.getElementById("filter-logs-type");
@@ -1767,7 +2259,7 @@ function restoreFilters() {
     sortDir: parsed.sortDir || "desc",
     clientSearch: parsed.clientSearch || "",
     churnYear: parsed.churnYear || String(new Date().getFullYear()),
-    logsFilterType: parsed.logsFilterType || "",
+    logsFilterType: logsFilterType,
     logsFilterPlan: parsed.logsFilterPlan || "",
     logsSearchTerm: parsed.logsSearchTerm || ""
   };
@@ -1816,7 +2308,8 @@ function bindEvents() {
   document.getElementById("nav-resumo")?.addEventListener("click", () => switchTab("resumo"));
   document.getElementById("nav-clientes")?.addEventListener("click", () => switchTab("clientes"));
   document.getElementById("nav-comercial")?.addEventListener("click", () => switchTab("comercial"));
-  document.getElementById("nav-suporte")?.addEventListener("click", () => switchTab("suporte"));
+  document.getElementById("nav-churn")?.addEventListener("click", () => switchTab("churn"));
+  document.getElementById("nav-nps")?.addEventListener("click", () => switchTab("nps"));
   document.getElementById("nav-lancamentos")?.addEventListener("click", () => switchTab("lancamentos"));
   document.getElementById("nav-logs")?.addEventListener("click", () => switchTab("logs"));
   const registroTipo = document.getElementById("registro_tipo");
@@ -1845,7 +2338,8 @@ function bindEvents() {
   setupPhoneMask("edit_client_telefone");
   document.getElementById("btn-open-new-client-modal")?.addEventListener("click", openNewClientModal);
   document.getElementById("btn-comercial-new-client")?.addEventListener("click", openNewClientModal);
-  document.getElementById("btn-suporte-new-client")?.addEventListener("click", openNewClientModal);
+  document.getElementById("btn-churn-new-client")?.addEventListener("click", openNewClientModal);
+  document.getElementById("btn-nps-new-client")?.addEventListener("click", openNewClientModal);
   document.getElementById("btn-new-client-close")?.addEventListener("click", () => {
     document.getElementById("new-client-modal")?.close();
   });
@@ -1972,7 +2466,7 @@ function bindEvents() {
     localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
     renderClients(Array.isArray(currentClientRawList) ? currentClientRawList : []);
   });
-  document.getElementById("support-heatmap-year")?.addEventListener("change", async (event) => {
+  document.getElementById("churn-heatmap-year")?.addEventListener("change", async (event) => {
     selectedSupportMonth = null;
     currentFilters = { ...currentFilters, churnYear: event.target.value || String(new Date().getFullYear()) };
     localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
@@ -1999,10 +2493,7 @@ function bindEvents() {
     renderClients(currentClientList);
   });
   document.getElementById("filter-logs-type")?.addEventListener("change", (event) => {
-    logsFilterType = event.target.value || "";
-    currentFilters = { ...currentFilters, logsFilterType };
-    localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
-    renderLogsTable(rawLogsCache);
+    setLogsAuditSection(event.target.value || "nps");
   });
   document.getElementById("filter-logs-plan")?.addEventListener("change", (event) => {
     logsFilterPlan = event.target.value || "";
@@ -2017,18 +2508,21 @@ function bindEvents() {
     renderLogsTable(rawLogsCache);
   });
   document.getElementById("btn-clear-logs-filters")?.addEventListener("click", () => {
-    logsFilterType = "";
     logsFilterPlan = "";
     logsSearchTerm = "";
-    const logsTypeSel = document.getElementById("filter-logs-type");
-    if (logsTypeSel) logsTypeSel.value = "";
     const logsPlanSel = document.getElementById("filter-logs-plan");
     if (logsPlanSel) logsPlanSel.value = "";
     const logsSearchInput = document.getElementById("filter-logs-search");
     if (logsSearchInput) logsSearchInput.value = "";
-    currentFilters = { ...currentFilters, logsFilterType: "", logsFilterPlan: "", logsSearchTerm: "" };
+    setLogsAuditSection("nps");
+    currentFilters = { ...currentFilters, logsFilterPlan: "", logsSearchTerm: "" };
     localStorage.setItem("mindlaw_filters", JSON.stringify(currentFilters));
-    renderLogsTable(rawLogsCache);
+  });
+  document.getElementById("audit-section-nav")?.addEventListener("click", (event) => {
+    const btn = event.target.closest("[data-audit-section]");
+    if (!btn) return;
+    const sec = btn.getAttribute("data-audit-section");
+    if (sec === "comercial" || sec === "churn" || sec === "nps") setLogsAuditSection(sec);
   });
   document.getElementById("logs-active-interactive-filter")?.addEventListener("click", (event) => {
     const clearBtn = event.target.closest("#btn-clear-interactive-filter");
@@ -2083,14 +2577,14 @@ function bindEvents() {
       toast(error.message || "Erro ao atualizar lançamento.");
     }
   });
-  document.getElementById("heatmap")?.addEventListener("click", (event) => {
+  document.getElementById("churn-heatmap")?.addEventListener("click", (event) => {
     const trigger = event.target.closest("[data-support-month]");
     if (!trigger) return;
     const idx = Number(trigger.getAttribute("data-support-month"));
     if (Number.isNaN(idx)) return;
     selectedSupportMonth = idx;
-    const supportView = document.getElementById("view-suporte");
-    if (!supportView?.classList.contains("hidden")) {
+    const churnView = document.getElementById("view-churn");
+    if (!churnView?.classList.contains("hidden")) {
       carregarTudo().catch((error) => toast(error.message || "Erro ao carregar detalhes do mês."));
     }
   });
@@ -2171,7 +2665,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   bindRevealObserver();
   renderClients([]);
   restoreFilters();
-  switchTab(localStorage.getItem("mindlaw_active_tab") || "resumo");
+  const initialTab = localStorage.getItem("mindlaw_active_tab") || "resumo";
+  switchTab(initialTab === "suporte" ? "churn" : initialTab);
   try {
     await carregarTudo();
   } catch (error) {

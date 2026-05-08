@@ -190,7 +190,9 @@ function filterSupportByRange(support, range) {
   if (!range) return support;
   return support.filter((doc) => {
     const type = classifySupport(doc);
-    const rawDate = type === "churn" ? doc.dataChurn : doc.dataNPS;
+    /** Mesma referência temporal que o payload de /logs (`dataChurn || dataNPS || createdAt`). */
+    const rawDate =
+      type === "churn" ? doc.dataChurn || doc.createdAt : doc.dataNPS || doc.createdAt;
     const date = new Date(rawDate);
     return !Number.isNaN(date.getTime()) && date >= range.start && date <= range.end;
   });
@@ -385,12 +387,12 @@ router.post("/support/churn", async (req, res) => {
 
 function extractNpsStructuredFields(payload = {}) {
   return {
-    npsMelhorarExperiencia: String(payload.npsMelhorarExperiencia || payload.melhorarExperiencia || "").trim().slice(0, 2000),
-    npsFaltouNota9: String(payload.npsFaltouNota9 || payload.faltouNota9 || "").trim().slice(0, 2000),
-    npsAreasMelhorar: String(payload.npsAreasMelhorar || payload.areasMelhorar || "").trim().slice(0, 2000),
-    npsExperienciaAteAqui: String(payload.npsExperienciaAteAqui || payload.experienciaAteAqui || "").trim().slice(0, 2000),
-    npsFuncionalidadeDiaadia: String(payload.npsFuncionalidadeDiaadia || payload.funcionalidadeDiaadia || "").trim().slice(0, 2000),
-    npsComentarioAdicional: String(payload.npsComentarioAdicional || payload.comentarioAdicional || "").trim().slice(0, 2000)
+    npsMelhorarExperiencia: String(payload.npsMelhorarExperiencia || payload.melhorarExperiencia || "").trim().slice(0, 10000),
+    npsFaltouNota9: String(payload.npsFaltouNota9 || payload.faltouNota9 || "").trim().slice(0, 10000),
+    npsAreasMelhorar: String(payload.npsAreasMelhorar || payload.areasMelhorar || "").trim().slice(0, 10000),
+    npsExperienciaAteAqui: String(payload.npsExperienciaAteAqui || payload.experienciaAteAqui || "").trim().slice(0, 10000),
+    npsFuncionalidadeDiaadia: String(payload.npsFuncionalidadeDiaadia || payload.funcionalidadeDiaadia || "").trim().slice(0, 10000),
+    npsComentarioAdicional: String(payload.npsComentarioAdicional || payload.comentarioAdicional || "").trim().slice(0, 10000)
   };
 }
 
@@ -402,7 +404,7 @@ router.post("/support/nps", async (req, res) => {
       registerType: "nps",
       cliente: payload.cliente,
       notaNPS: Number(payload.notaNPS),
-      comentarioNPS: String(payload.comentarioNPS || "").slice(0, 2000),
+      comentarioNPS: String(payload.comentarioNPS || "").slice(0, 10000),
       dataNPS: payload.dataNPS || null,
       ...structured
     });
