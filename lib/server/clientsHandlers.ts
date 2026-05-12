@@ -1,6 +1,6 @@
 import XLSX from "xlsx";
 import type { WorkBook } from "xlsx";
-import { getRangeFromQuery } from "../dateRange";
+import { getRangeFromQuery } from "../dateRange.js";
 import { getCjsModels } from "../cjsModels";
 import { filterDuplicatedLostSales, filterSalesByRange, filterSupportByRange } from "./filters";
 

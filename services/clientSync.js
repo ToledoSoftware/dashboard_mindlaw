@@ -3,7 +3,7 @@ const path = require("path");
 const Support = require("../models/Support");
 const Sale = require("../models/Sale");
 const ClientModel = require("../models/Client");
-const { getRangeFromQuery } = require("../lib/dateRange");
+const { getRangeFromQuery } = require("../lib/dateRange.js");
 const { parseBlocosCliente } = require("../lib/mapSituacaoCliente");
 
 const STATUS_FALLBACK = ["cliente", "pagamento_pendente", "pagamento_recusado", "cancelado", "novo_lead"];

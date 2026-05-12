@@ -1,4 +1,4 @@
-import { getRangeFromQuery } from "../dateRange";
+import { getRangeFromQuery } from "../dateRange.js";
 import { getCjsModels } from "../cjsModels";
 import {
   classifySupport,

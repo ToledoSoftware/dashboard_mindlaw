@@ -1,4 +1,4 @@
-import type { DateRange } from "../dateRange";
+import type { DateRange } from "../dateRange.js";
 
 export function normalizeNameKey(value: string | undefined) {
   return String(value || "")
