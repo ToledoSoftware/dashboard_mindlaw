@@ -4,6 +4,10 @@
     {
       "src": "server.js",
       "use": "@vercel/node"
+    },
+    {
+      "src": "public/**",
+      "use": "@vercel/static"
     }
   ],
   "routes": [
@@ -13,11 +17,11 @@
     },
     {
       "src": "/login",
-      "dest": "/login.html"
+      "dest": "/public/login.html"
     },
     {
-      "src": "/(.*)",
-      "dest": "/$1"
+      "src": "^/(?!api|public)(.*)",
+      "dest": "/public/$1"
     }
   ]
 }
