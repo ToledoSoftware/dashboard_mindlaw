@@ -268,24 +268,39 @@ async function seedDefaultUser() {
   console.log(`Usuário padrão criado: ${username}`);
 }
 
-async function bootstrap() {
+async function connectMongo() {
   if (!MONGODB_URI) {
-    throw new Error("MONGODB_URI não configurado no ambiente.");
+    console.error("[MindLaw] MONGODB_URI ausente; conexão com MongoDB não será iniciada (serverless/cold start).");
+    return;
   }
+  try {
+    await mongoose.connect(MONGODB_URI, {
+      serverSelectionTimeoutMS: 15000
+    });
+    console.log("MongoDB conectado.");
+  } catch (error) {
+    console.error("[MindLaw] Falha ao conectar no MongoDB:", error.message);
+    console.error("[MindLaw] Em cold start na Vercel, URI ausente ou rede indisponível não derruba o processo; novas invocações podem reconectar.");
+  }
+}
+
+async function bootstrap() {
   if (!process.env.JWT_SECRET) {
-    throw new Error("JWT_SECRET não configurado no ambiente.");
+    console.error("[MindLaw] JWT_SECRET não configurado; autenticação JWT pode falhar.");
+  }
+
+  await connectMongo();
+
+  if (mongoose.connection.readyState !== 1) {
+    console.warn("[MindLaw] Bootstrap sem MongoDB conectado; seed/sync ignorados até conexão estável.");
+    return;
   }
 
   try {
-    await mongoose.connect(MONGODB_URI);
-    console.log("MongoDB conectado.");
+    await seedDefaultUser();
   } catch (error) {
-    console.error("[MindLaw] Falha ao conectar no MongoDB Atlas.");
-    console.error("[MindLaw] Em deploy (Vercel), isso pode ocorrer em cold start por variáveis de ambiente ausentes ou rede momentaneamente indisponível.");
-    throw error;
+    console.error("[MindLaw] Aviso: seedDefaultUser:", error.message);
   }
-
-  await seedDefaultUser();
 
   try {
     await Client.syncIndexes();
@@ -307,19 +322,14 @@ async function bootstrap() {
   } catch (error) {
     console.error("Aviso: sincronizacao de clientes na subida:", error.message);
   }
-
-  if (process.env.NODE_ENV !== "production") {
-    app.listen(PORT, () => {
-      console.log(`Servidor MindLaw ativo na porta ${PORT}`);
-    });
-  }
 }
 
 bootstrap().catch((error) => {
-  console.error("Erro ao iniciar servidor:", error.message);
-  if (process.env.NODE_ENV !== "production") {
-    process.exit(1);
-  }
+  console.error("[MindLaw] Erro inesperado no bootstrap:", error.message);
 });
+
+if (process.env.NODE_ENV !== "production") {
+  app.listen(PORT, () => console.log("Rodando local"));
+}
 
 module.exports = app;
