@@ -17,7 +17,10 @@ const saleSchema = new mongoose.Schema(
     },
     funcionalidadeFaltante: { type: String, default: "", trim: true, maxlength: 500 },
     detalhamentoTecnico: { type: String, default: "", maxlength: 2000 },
-    competidor: { type: String, default: "", trim: true, maxlength: 120 }
+    competidor: { type: String, default: "", trim: true, maxlength: 120 },
+    /** Dados do lançamento para espelho / auditoria (não substituem o cadastro de Client). */
+    telefone: { type: String, default: "", trim: true, maxlength: 50 },
+    plano: { type: String, default: "", trim: true, maxlength: 40 }
   },
   { timestamps: true }
 );

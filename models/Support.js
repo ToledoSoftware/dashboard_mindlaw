@@ -22,7 +22,10 @@ const supportSchema = new mongoose.Schema(
     npsAreasMelhorar: { type: String, default: "", trim: true, maxlength: 10000 },
     npsExperienciaAteAqui: { type: String, default: "", trim: true, maxlength: 10000 },
     npsFuncionalidadeDiaadia: { type: String, default: "", trim: true, maxlength: 10000 },
-    npsComentarioAdicional: { type: String, default: "", trim: true, maxlength: 10000 }
+    npsComentarioAdicional: { type: String, default: "", trim: true, maxlength: 10000 },
+    /** Snapshot no registo (espelho / auditoria); o cadastro oficial é `Client`. */
+    telefone: { type: String, default: "", trim: true, maxlength: 50 },
+    plano: { type: String, default: "", trim: true, maxlength: 40 }
   },
   { timestamps: true }
 );

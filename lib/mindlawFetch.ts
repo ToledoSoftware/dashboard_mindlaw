@@ -1,9 +1,6 @@
+/** Cabeçalhos JSON; autenticação via cookie httpOnly `mindlaw_token` (credentials: include). */
 export function mindlawAuthHeaders(): HeadersInit {
-  const token = typeof window !== "undefined" ? localStorage.getItem("mindlaw_token") : null;
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
-  };
+  return { "Content-Type": "application/json" };
 }
 
 export async function mindlawJson<T>(url: string, init?: RequestInit): Promise<T> {
@@ -15,7 +12,6 @@ export async function mindlawJson<T>(url: string, init?: RequestInit): Promise<T
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401) {
-      localStorage.removeItem("mindlaw_token");
       window.location.href = "/login";
     }
     throw new Error((data as { error?: string }).error || "Erro na requisição.");

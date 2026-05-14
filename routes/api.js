@@ -270,9 +270,15 @@ router.post("/sales", async (req, res) => {
       motivoPerda: payload.motivoPerda || "Sem Motivo",
       funcionalidadeFaltante: justificativaMotivo,
       detalhamentoTecnico: payload.detalhamentoTecnico || "",
-      competidor: payload.competidor || ""
+      competidor: payload.competidor || "",
+      telefone: String(payload.telefone || "").trim(),
+      plano: String(payload.plano || "").trim()
     });
-    await ensureClientByName(payload.cliente, { plano: payload.plano || "" });
+    await ensureClientByName(payload.cliente, {
+      plano: payload.plano || "",
+      dataReferencia: payload.data,
+      telefone: String(payload.telefone || "").trim()
+    });
     return res.status(201).json({ status: "ok", data: sale });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao salvar dado comercial." });
@@ -301,11 +307,14 @@ router.put("/sales/:id", async (req, res) => {
     }
     if (payload.detalhamentoTecnico !== undefined) patch.detalhamentoTecnico = payload.detalhamentoTecnico || "";
     if (payload.competidor !== undefined) patch.competidor = payload.competidor || "";
+    if (payload.telefone !== undefined) patch.telefone = String(payload.telefone || "").trim();
+    if (payload.plano !== undefined) patch.plano = String(payload.plano || "").trim();
     const updated = await Sale.findByIdAndUpdate(id, { $set: patch }, { new: true, runValidators: true });
     if (!updated) return res.status(404).json({ error: "Registro comercial não encontrado." });
-    if (payload.plano !== undefined) {
-      await ensureClientByName(updated.cliente, { plano: payload.plano || "" });
-    }
+    const extra = { dataReferencia: updated.data };
+    if (payload.plano !== undefined) extra.plano = payload.plano || "";
+    if (payload.telefone !== undefined) extra.telefone = String(updated.telefone || "").trim();
+    await ensureClientByName(updated.cliente, extra);
     return res.json({ status: "ok", data: updated });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao atualizar dado comercial." });
@@ -350,12 +359,23 @@ router.post("/support", async (req, res) => {
       funcionalidadeFaltante: justificativaMotivo,
       notaNPS: payload.notaNPS !== undefined && payload.notaNPS !== "" ? Number(payload.notaNPS) : undefined,
       comentarioNPS: payload.comentarioNPS || "",
-      dataNPS: payload.dataNPS || null
+      dataNPS: payload.dataNPS || null,
+      telefone: String(payload.telefone || "").trim(),
+      plano: String(payload.plano || "").trim()
     });
     if (registerType === "churn") {
-      await ensureClientByName(payload.cliente, { statusContrato: "cancelado", plano: payload.plano || "" });
+      await ensureClientByName(payload.cliente, {
+        statusContrato: "cancelado",
+        plano: payload.plano || "",
+        telefone: String(payload.telefone || "").trim(),
+        dataReferencia: payload.dataChurn
+      });
     } else {
-      await ensureClientByName(payload.cliente, { plano: payload.plano || "" });
+      await ensureClientByName(payload.cliente, {
+        plano: payload.plano || "",
+        telefone: String(payload.telefone || "").trim(),
+        dataReferencia: payload.dataNPS
+      });
     }
     return res.status(201).json({ status: "ok", data: support });
   } catch (error) {
@@ -376,9 +396,16 @@ router.post("/support/churn", async (req, res) => {
       valorPerdido: Number(payload.valorPerdido || 0),
       dataChurn: payload.dataChurn || null,
       motivoPrincipal: payload.motivoPrincipal || "Sem Motivo",
-      funcionalidadeFaltante: justificativaMotivo
+      funcionalidadeFaltante: justificativaMotivo,
+      telefone: String(payload.telefone || "").trim(),
+      plano: String(payload.plano || "").trim()
     });
-    await ensureClientByName(payload.cliente, { statusContrato: "cancelado", plano: payload.plano || "" });
+    await ensureClientByName(payload.cliente, {
+      statusContrato: "cancelado",
+      plano: payload.plano || "",
+      telefone: String(payload.telefone || "").trim(),
+      dataReferencia: payload.dataChurn
+    });
     return res.status(201).json({ status: "ok", data: support });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao salvar churn." });
@@ -406,9 +433,15 @@ router.post("/support/nps", async (req, res) => {
       notaNPS: Number(payload.notaNPS),
       comentarioNPS: String(payload.comentarioNPS || "").slice(0, 10000),
       dataNPS: payload.dataNPS || null,
+      telefone: String(payload.telefone || "").trim(),
+      plano: String(payload.plano || "").trim(),
       ...structured
     });
-    await ensureClientByName(payload.cliente, { plano: payload.plano || "" });
+    await ensureClientByName(payload.cliente, {
+      plano: payload.plano || "",
+      telefone: String(payload.telefone || "").trim(),
+      dataReferencia: payload.dataNPS
+    });
     return res.status(201).json({ status: "ok", data: support });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao salvar NPS." });
@@ -438,6 +471,8 @@ router.put("/support/:id", async (req, res) => {
     }
     if (payload.comentarioNPS !== undefined) support.comentarioNPS = payload.comentarioNPS || "";
     if (payload.dataNPS !== undefined) support.dataNPS = payload.dataNPS || null;
+    if (payload.telefone !== undefined) support.telefone = String(payload.telefone || "").trim();
+    if (payload.plano !== undefined) support.plano = String(payload.plano || "").trim();
     if (
       payload.npsMelhorarExperiencia !== undefined ||
       payload.npsFaltouNota9 !== undefined ||
@@ -461,10 +496,17 @@ router.put("/support/:id", async (req, res) => {
       support.npsComentarioAdicional = s.npsComentarioAdicional;
     }
     await support.save();
+    const extra = {};
+    if (payload.plano !== undefined) extra.plano = payload.plano || "";
+    if (payload.telefone !== undefined) extra.telefone = String(payload.telefone || "").trim();
     if (support.registerType === "churn") {
-      await ensureClientByName(support.cliente, { statusContrato: "cancelado", plano: payload.plano || "" });
+      await ensureClientByName(support.cliente, {
+        statusContrato: "cancelado",
+        dataReferencia: support.dataChurn,
+        ...extra
+      });
     } else {
-      await ensureClientByName(support.cliente, { plano: payload.plano || "" });
+      await ensureClientByName(support.cliente, { dataReferencia: support.dataNPS, ...extra });
     }
     return res.json({ status: "ok", data: support });
   } catch (error) {
@@ -758,7 +800,7 @@ router.get("/logs", async (_req, res) => {
     const [salesRaw, support, clients] = await Promise.all([
       Sale.find().sort({ createdAt: -1 }).lean(),
       Support.find().sort({ createdAt: -1 }).lean(),
-      Client.find({}).select("nome plano").lean()
+      Client.find({}).select("nome plano telefone statusContrato").lean()
     ]);
     const clientPlanByName = new Map(
       clients.map((client) => [normalizeNameKey(client.nome), client.plano || ""])
@@ -768,36 +810,50 @@ router.get("/logs", async (_req, res) => {
     const supportFiltered = filterSupportByRange(support, range);
 
     const logs = [
-      ...sales.map((item) => ({
-        id: String(item._id || ""),
-        origem: "comercial",
-        tipo: "Comercial",
-        cliente: item.cliente,
-        plano: clientPlanByName.get(normalizeNameKey(item.cliente)) || "",
-        data: item.data,
-        status: item.status,
-        detalhe: formatDetalheMotivo(item.motivoPerda, item.funcionalidadeFaltante),
-        payload: {
+      ...sales.map((item) => {
+        const nomeKey = normalizeNameKey(item.cliente);
+        const snapPlano = String(item.plano || "").trim();
+        const snapTel = String(item.telefone || "").trim();
+        const planoJoined = clientPlanByName.get(nomeKey) || "";
+        const planoDisplay = snapPlano || planoJoined;
+        return {
+          id: String(item._id || ""),
+          origem: "comercial",
+          tipo: "Comercial",
           cliente: item.cliente,
+          plano: planoDisplay,
           data: item.data,
-          valorContrato: item.valorContrato || 0,
-          status: item.status || "Em Negociacao",
-          motivoPerda: item.motivoPerda || "Sem Motivo",
-          funcionalidadeFaltante: item.funcionalidadeFaltante || "",
-          detalhamentoTecnico: item.detalhamentoTecnico || "",
-          competidor: item.competidor || ""
-        }
-      })),
+          status: item.status,
+          detalhe: formatDetalheMotivo(item.motivoPerda, item.funcionalidadeFaltante),
+          payload: {
+            cliente: item.cliente,
+            data: item.data,
+            valorContrato: item.valorContrato || 0,
+            status: item.status || "Em Negociacao",
+            motivoPerda: item.motivoPerda || "Sem Motivo",
+            funcionalidadeFaltante: item.funcionalidadeFaltante || "",
+            detalhamentoTecnico: item.detalhamentoTecnico || "",
+            competidor: item.competidor || "",
+            telefone: snapTel,
+            plano: snapPlano || planoJoined
+          }
+        };
+      }),
       ...supportFiltered.map((item) => {
         const isNps = classifySupport(item) === "nps";
         const cat = isNps ? deriveCategoriaNps(item) : "";
         const npsCols = isNps ? buildNpsColumnMap(item) : null;
+        const nomeKey = normalizeNameKey(item.cliente);
+        const snapPlano = String(item.plano || "").trim();
+        const snapTel = String(item.telefone || "").trim();
+        const planoJoined = clientPlanByName.get(nomeKey) || "";
+        const planoDisplay = snapPlano || planoJoined;
         return {
           id: String(item._id || ""),
           origem: classifySupport(item),
           tipo: isNps ? "NPS" : "Churn",
           cliente: item.cliente,
-          plano: clientPlanByName.get(normalizeNameKey(item.cliente)) || "",
+          plano: planoDisplay,
           data: item.dataChurn || item.dataNPS || item.createdAt,
           status: isNps ? cat || "NPS" : "Churn",
           detalhe: isNps ? item.comentarioNPS || "-" : formatDetalheMotivo(item.motivoPrincipal, item.funcionalidadeFaltante),
@@ -815,7 +871,9 @@ router.get("/logs", async (_req, res) => {
                 npsAreasMelhorar: item.npsAreasMelhorar || "",
                 npsExperienciaAteAqui: item.npsExperienciaAteAqui || "",
                 npsFuncionalidadeDiaadia: item.npsFuncionalidadeDiaadia || "",
-                npsComentarioAdicional: item.npsComentarioAdicional || ""
+                npsComentarioAdicional: item.npsComentarioAdicional || "",
+                telefone: snapTel,
+                plano: snapPlano || planoJoined
               }
             : {
                 registerType: "churn",
@@ -823,7 +881,9 @@ router.get("/logs", async (_req, res) => {
                 dataChurn: item.dataChurn || null,
                 valorPerdido: item.valorPerdido || 0,
                 motivoPrincipal: item.motivoPrincipal || "Sem Motivo",
-                funcionalidadeFaltante: item.funcionalidadeFaltante || ""
+                funcionalidadeFaltante: item.funcionalidadeFaltante || "",
+                telefone: snapTel,
+                plano: snapPlano || planoJoined
               }
         };
       })

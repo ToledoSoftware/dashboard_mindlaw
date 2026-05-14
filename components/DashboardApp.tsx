@@ -1,24 +1,29 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from "react";
 import "@/components/chartRegister";
 import { Bar, Doughnut, Line } from "react-chartjs-2";
 import type { ChartOptions } from "chart.js";
+import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { PeriodFilterPopover } from "@/components/PeriodFilterPopover";
 import { Sidebar, MobileHeader, DesktopSpacer, type TabId } from "@/components/Sidebar";
 import { LaunchCenter, type ClientRow } from "@/components/LaunchCenter";
 import { FeedbackFeed, type NpsFeedbackItem } from "@/components/FeedbackFeed";
-import { LogsAuditPanel, type AuditLogRow, type InteractiveLogFilter } from "@/components/LogsAuditPanel";
+import { LogsAuditPanel, type AuditLogRow, type AuditNavigateToClientPayload, type InteractiveLogFilter } from "@/components/LogsAuditPanel";
 import { ClientsPanel, type ClientDoc } from "@/components/ClientsPanel";
+import { GlobalSearch } from "@/components/GlobalSearch";
 import { calcularNpsReal } from "@/lib/npsScore";
 import { buildDashboardQuery, formatLocalDateYMD, CLIENT_STATUS_LABELS } from "@/lib/dashboardQuery";
 import { mindlawJson, mindlawAuthHeaders } from "@/lib/mindlawFetch";
 import { normalizeText } from "@/lib/stringUtils";
 import { formatBrl, formatPct } from "@/lib/formatMoney";
+import { clientContractStatusChipClass, clientContractStatusLabel } from "@/lib/clientContractStatus";
 import { withHoverPointer } from "@/lib/chartInteractions";
 import { SkeletonChart, SkeletonKpiGrid } from "@/components/SkeletonCard";
 import { EmptyState } from "@/components/EmptyState";
 import { KpiWithTooltip } from "@/components/KpiWithTooltip";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 
 function monthBoundsLocal() {
   const n = new Date();
@@ -100,12 +105,103 @@ type ChurnDetailRow = {
   statusContrato?: string;
 };
 
+type SupportDashboard = {
+  kpis: { churnRate: number; npsScore: number };
+  churnByMonth: number[];
+  churnDetailsByMonth?: ChurnDetailRow[][];
+  churnReasonDistribution: Record<string, number>;
+  npsDistribution: { Promotor: number; Neutro: number; Detrator: number };
+  support: Record<string, unknown>[];
+  totalMrrPerdido: number;
+  clientEntradaStats?: { byStatus: Record<string, number>; total: number; range?: unknown };
+};
+
+type MainDashboardPayload = {
+  clientsLaunch: ClientRow[];
+  commercial: {
+    kpis: { ltvEstimado: number; taxaConversao: number };
+    funnel: { gains: number; losses: number; negotiating: number };
+    lossReasons: Record<string, number>;
+    sales?: Record<string, unknown>[];
+  };
+  support: SupportDashboard;
+  clientsFull: ClientDoc[];
+  clientsActiveCliente: ClientDoc[];
+};
+
+type LogsPageResponse = {
+  logs: AuditLogRow[];
+  logsTotal: number;
+  logsHasMore: boolean;
+  nextOffset?: number;
+};
+
+const LOGS_PAGE = 120;
+const TAB_IDS: TabId[] = ["resumo", "clientes", "comercial", "churn", "nps", "lancamentos", "logs"];
+
+function logsListUrl(apiQuery: string, offset: number) {
+  const join = apiQuery.includes("?") ? "&" : "?";
+  return `/api/logs${apiQuery}${join}logsLimit=${LOGS_PAGE}&logsOffset=${offset}`;
+}
+
+async function fetchMainDashboard(
+  signal: AbortSignal,
+  apiQuery: string,
+  startDate: string,
+  endDate: string,
+  churnYear: number
+): Promise<MainDashboardPayload> {
+  const suffix = apiQuery;
+  const generalCliente = buildDashboardQuery({
+    startDate,
+    endDate,
+    clientStatus: "cliente",
+    churnYear
+  });
+  const [cForm, comm, sup, clientsList, activeList] = await Promise.all([
+    mindlawJson<{ clients: { _id: string; nome: string; plano?: string; telefone?: string; statusContrato?: string }[] }>(
+      `/api/clients?forForms=1`,
+      { signal }
+    ),
+    mindlawJson<MainDashboardPayload["commercial"]>(`/api/commercial/dashboard${suffix}`, { signal }),
+    mindlawJson<SupportDashboard>(`/api/support/dashboard${suffix}`, { signal }),
+    mindlawJson<{ clients: ClientDoc[] }>(`/api/clients${suffix}`, { signal }),
+    mindlawJson<{ clients: ClientDoc[] }>(`/api/clients${generalCliente}`, { signal })
+  ]);
+  return {
+    clientsLaunch: (cForm.clients || []).map((c) => ({
+      _id: String(c._id),
+      nome: c.nome,
+      plano: c.plano,
+      telefone: c.telefone,
+      statusContrato: c.statusContrato
+    })),
+    commercial: comm,
+    support: sup,
+    clientsFull: (clientsList.clients || []).map((c) => ({
+      ...c,
+      _id: String((c as { _id?: unknown })._id)
+    })) as ClientDoc[],
+    clientsActiveCliente: (activeList.clients || []).map((c) => ({
+      ...c,
+      _id: String((c as { _id?: unknown })._id)
+    })) as ClientDoc[]
+  };
+}
+
 export function DashboardApp() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
+  const urlInitRef = useRef(false);
+  const exportModalRef = useRef<HTMLDivElement>(null);
+
   const [tab, setTab] = useState<TabId>("resumo");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [{ startDate, endDate }, setPeriod] = useState(monthBoundsLocal);
-  const [toast, setToast] = useState("");
-  const [clientsLaunch, setClientsLaunch] = useState<ClientRow[]>([]);
+  type ToastState = { msg: string; variant: "info" | "error" } | null;
+  const [toast, setToast] = useState<ToastState>(null);
   const [churnYear, setChurnYear] = useState(new Date().getFullYear());
   const [clientFilters, setClientFilters] = useState<ClientFilters>({
     clientSegment: "",
@@ -121,35 +217,14 @@ export function DashboardApp() {
   const interactiveRef = useRef<InteractiveLogFilter>(null);
   const [selectedChurnMonth, setSelectedChurnMonth] = useState<number | null>(null);
   const [clientsSearchPrefill, setClientsSearchPrefill] = useState<string | null>(null);
+  const [clientsAuditCreatePrefill, setClientsAuditCreatePrefill] = useState<AuditNavigateToClientPayload | null>(null);
+  const [launchPrefillId, setLaunchPrefillId] = useState<string | null>(null);
   const [exportModalOpen, setExportModalOpen] = useState(false);
   const [exportSel, setExportSel] = useState({
     clients: false,
     commercial: true,
     support: true
   });
-
-  const [commercial, setCommercial] = useState<{
-    kpis: { ltvEstimado: number; taxaConversao: number };
-    funnel: { gains: number; losses: number; negotiating: number };
-    lossReasons: Record<string, number>;
-    sales?: Record<string, unknown>[];
-  } | null>(null);
-
-  const [support, setSupport] = useState<{
-    kpis: { churnRate: number; npsScore: number };
-    churnByMonth: number[];
-    churnDetailsByMonth?: ChurnDetailRow[][];
-    churnReasonDistribution: Record<string, number>;
-    npsDistribution: { Promotor: number; Neutro: number; Detrator: number };
-    support: Record<string, unknown>[];
-    totalMrrPerdido: number;
-    clientEntradaStats?: { byStatus: Record<string, number>; total: number; range?: unknown };
-  } | null>(null);
-
-  const [logs, setLogs] = useState<AuditLogRow[]>([]);
-  const [clientsFull, setClientsFull] = useState<ClientDoc[]>([]);
-  const [clientsActiveCliente, setClientsActiveCliente] = useState<ClientDoc[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
 
   const apiQuery = useMemo(
     () =>
@@ -166,10 +241,30 @@ export function DashboardApp() {
     [startDate, endDate, clientFilters, churnYear]
   );
 
-  const showToast = useCallback((msg: string) => {
-    setToast(msg);
-    setTimeout(() => setToast(""), 3200);
+  const showToast = useCallback((msg: string, variant: "info" | "error" = "info") => {
+    setToast({ msg, variant });
+    window.setTimeout(() => setToast(null), variant === "error" ? 12_000 : 3200);
   }, []);
+
+  const clearLaunchPrefill = useCallback(() => setLaunchPrefillId(null), []);
+
+  useLayoutEffect(() => {
+    if (urlInitRef.current) return;
+    urlInitRef.current = true;
+    const t = searchParams.get("tab") as TabId | null;
+    if (t && TAB_IDS.includes(t)) setTab(t);
+    const sd = searchParams.get("startDate");
+    const ed = searchParams.get("endDate");
+    if (sd && ed) setPeriod({ startDate: sd, endDate: ed });
+  }, [searchParams]);
+
+  useEffect(() => {
+    const p = new URLSearchParams();
+    p.set("tab", tab);
+    p.set("startDate", startDate);
+    p.set("endDate", endDate);
+    router.replace(`${pathname}?${p.toString()}`, { scroll: false });
+  }, [tab, startDate, endDate, pathname, router]);
 
   useEffect(() => {
     interactiveRef.current = interactiveFilter;
@@ -189,55 +284,81 @@ export function DashboardApp() {
     [showToast]
   );
 
-  const loadCore = useCallback(async () => {
-    setIsLoading(true);
-    const suffix = apiQuery;
-    const generalCliente = buildDashboardQuery({
-      startDate,
-      endDate,
-      clientStatus: "cliente",
-      churnYear
-    });
-    try {
-      const [cForm, comm, sup, lg, clientsList, activeList] = await Promise.all([
-        mindlawJson<{ clients: { _id: string; nome: string; plano?: string }[] }>(`/api/clients?forForms=1`),
-        mindlawJson<{
-          kpis: { ltvEstimado: number; taxaConversao: number };
-          funnel: { gains: number; losses: number; negotiating: number };
-          lossReasons: Record<string, number>;
-          sales?: Record<string, unknown>[];
-        }>(`/api/commercial/dashboard${suffix}`),
-        mindlawJson<typeof support>(`/api/support/dashboard${suffix}`),
-        mindlawJson<{ logs: AuditLogRow[] }>(`/api/logs${suffix}`),
-        mindlawJson<{ clients: ClientDoc[] }>(`/api/clients${suffix}`),
-        mindlawJson<{ clients: ClientDoc[] }>(`/api/clients${generalCliente}`)
-      ]);
-      setClientsLaunch((cForm.clients || []).map((c) => ({ _id: String(c._id), nome: c.nome, plano: c.plano })));
-      setCommercial(comm);
-      setSupport(sup);
-      setLogs(lg.logs || []);
-      setClientsFull(
-        (clientsList.clients || []).map((c) => ({
-          ...c,
-          _id: String((c as { _id?: unknown })._id)
-        })) as ClientDoc[]
-      );
-      setClientsActiveCliente(
-        (activeList.clients || []).map((c) => ({
-          ...c,
-          _id: String((c as { _id?: unknown })._id)
-        })) as ClientDoc[]
-      );
-    } catch (e) {
-      showToast((e as Error).message);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [apiQuery, startDate, endDate, churnYear, showToast]);
+  const mainQuery = useQuery({
+    queryKey: ["mindlaw-main", apiQuery],
+    queryFn: ({ signal }) => fetchMainDashboard(signal, apiQuery, startDate, endDate, churnYear)
+  });
 
+  const logsInfinite = useInfiniteQuery({
+    queryKey: ["mindlaw-logs", apiQuery],
+    initialPageParam: 0,
+    queryFn: ({ pageParam, signal }) =>
+      mindlawJson<LogsPageResponse>(logsListUrl(apiQuery, Number(pageParam)), { signal }),
+    getNextPageParam: (last) => (last.logsHasMore && last.nextOffset != null ? last.nextOffset : undefined)
+  });
+
+  const lastMainErr = useRef<string | null>(null);
   useEffect(() => {
-    void loadCore();
-  }, [loadCore]);
+    const m = mainQuery.error ? (mainQuery.error as Error).message : null;
+    if (m && m !== lastMainErr.current) {
+      lastMainErr.current = m;
+      showToast(m, "error");
+    }
+    if (!mainQuery.error) lastMainErr.current = null;
+  }, [mainQuery.error, showToast]);
+
+  const lastLogsErr = useRef<string | null>(null);
+  useEffect(() => {
+    const m = logsInfinite.error ? (logsInfinite.error as Error).message : null;
+    if (m && m !== lastLogsErr.current) {
+      lastLogsErr.current = m;
+      showToast(m, "error");
+    }
+    if (!logsInfinite.error) lastLogsErr.current = null;
+  }, [logsInfinite.error, showToast]);
+
+  const sessionQ = useQuery({
+    queryKey: ["auth-me"],
+    queryFn: ({ signal }) => mindlawJson<{ expiresAtMs?: number | null }>("/api/auth/me", { signal }),
+    staleTime: 60_000,
+    refetchInterval: 120_000
+  });
+  const expMs = sessionQ.data?.expiresAtMs ?? null;
+  const sessionWarn =
+    expMs != null && expMs > Date.now() && expMs - Date.now() < 20 * 60 * 1000;
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ["mindlaw-main", apiQuery] }),
+      queryClient.invalidateQueries({ queryKey: ["mindlaw-logs", apiQuery] })
+    ]);
+  }, [apiQuery, queryClient]);
+
+  const onClientsLaunchChange = useCallback(
+    (u: SetStateAction<ClientRow[]>) => {
+      queryClient.setQueryData(["mindlaw-main", apiQuery], (prev: MainDashboardPayload | undefined) => {
+        if (!prev) return prev;
+        const next = typeof u === "function" ? (u as (c: ClientRow[]) => ClientRow[])(prev.clientsLaunch) : u;
+        return { ...prev, clientsLaunch: next };
+      });
+    },
+    [apiQuery, queryClient]
+  );
+
+  const clientsLaunch = useMemo(() => mainQuery.data?.clientsLaunch ?? [], [mainQuery.data]);
+  const commercial = useMemo(() => mainQuery.data?.commercial ?? null, [mainQuery.data]);
+  const support = useMemo(() => mainQuery.data?.support ?? null, [mainQuery.data]);
+  const clientsFull = useMemo(() => mainQuery.data?.clientsFull ?? [], [mainQuery.data]);
+  const clientsActiveCliente = useMemo(() => mainQuery.data?.clientsActiveCliente ?? [], [mainQuery.data]);
+  const logs = useMemo(
+    () => logsInfinite.data?.pages.flatMap((p) => p.logs) ?? [],
+    [logsInfinite.data]
+  );
+
+  const isLoading =
+    mainQuery.isPending || (logsInfinite.isPending && logsInfinite.data == null);
+
+  useFocusTrap(exportModalOpen, exportModalRef, () => setExportModalOpen(false));
 
   const npsEntries = useMemo(() => {
     const s = support?.support || [];
@@ -246,16 +367,27 @@ export function DashboardApp() {
 
   const npsCalculado = useMemo(() => calcularNpsReal(npsEntries as { notaNPS?: number }[]), [npsEntries]);
 
-  const clientPlanoLookup = useMemo(() => {
-    const rows: { nome: string; plano?: string; telefone?: string }[] = clientsLaunch.map((c) => ({
-      nome: c.nome,
-      plano: c.plano
-    }));
-    for (const c of clientsFull) {
-      rows.push({ nome: c.nome, plano: c.plano, telefone: c.telefone });
-    }
-    return rows;
+  const clientRegistryByNomeKey = useMemo(() => {
+    const m = new Map<string, { nome: string; plano?: string; telefone?: string; statusContrato?: string }>();
+    const merge = (c: { nome: string; plano?: string; telefone?: string; statusContrato?: string }) => {
+      const k = normalizeText(String(c.nome || ""));
+      if (!k) return;
+      const prev = m.get(k);
+      const plano = String(c.plano ?? "").trim();
+      const tel = String(c.telefone ?? "").trim();
+      m.set(k, {
+        nome: c.nome,
+        plano: plano || prev?.plano,
+        telefone: tel || prev?.telefone,
+        statusContrato: c.statusContrato || prev?.statusContrato
+      });
+    };
+    for (const c of clientsLaunch) merge(c);
+    for (const c of clientsFull) merge(c);
+    return m;
   }, [clientsLaunch, clientsFull]);
+
+  const clientPlanoLookup = useMemo(() => Array.from(clientRegistryByNomeKey.values()), [clientRegistryByNomeKey]);
 
   const resumoStrictActiveClients = useMemo(
     () =>
@@ -372,7 +504,7 @@ export function DashboardApp() {
         showToast("Planilha gerada.");
         setExportModalOpen(false);
       } catch (e) {
-        showToast((e as Error).message);
+        showToast((e as Error).message, "error");
       }
     },
     [apiQuery, showToast]
@@ -380,7 +512,6 @@ export function DashboardApp() {
 
   async function handleLogout() {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
-    localStorage.removeItem("mindlaw_token");
     window.location.href = "/login";
   }
 
@@ -619,11 +750,77 @@ export function DashboardApp() {
   const churnDetails = support?.churnDetailsByMonth?.[safeMonthIdx] || [];
   const monthShort = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
 
+  const comercialMirrorLogs = useMemo(() => {
+    const sales = commercial?.sales;
+    if (!sales?.length) return [];
+    const byNome = clientRegistryByNomeKey;
+    return sales.map((raw) => {
+      const item = raw as Record<string, unknown>;
+      const nome = String(item.cliente || "");
+      const hit = byNome.get(normalizeText(nome));
+      const snapPlano = String(item.plano || "").trim();
+      const snapTel = String(item.telefone || "").trim();
+      const motivo = String(item.motivoPerda || "Sem Motivo");
+      const funcionalidadeFaltante = String(item.funcionalidadeFaltante || "");
+      const detalhe = funcionalidadeFaltante ? `${motivo} — ${funcionalidadeFaltante}` : motivo;
+      const planoDisplay = snapPlano || String(hit?.plano || "");
+      return {
+        id: String(item._id || ""),
+        origem: "comercial",
+        tipo: "Comercial",
+        cliente: nome,
+        plano: planoDisplay,
+        statusContrato: hit?.statusContrato,
+        data: item.data as string | undefined,
+        status: String(item.status || ""),
+        detalhe,
+        payload: {
+          cliente: nome,
+          data: item.data,
+          valorContrato: Number(item.valorContrato ?? 0),
+          status: String(item.status || "Em Negociacao"),
+          motivoPerda: item.motivoPerda || "Sem Motivo",
+          funcionalidadeFaltante: item.funcionalidadeFaltante || "",
+          detalhamentoTecnico: item.detalhamentoTecnico || "",
+          competidor: item.competidor || "",
+          telefone: snapTel,
+          plano: snapPlano || String(hit?.plano || "")
+        }
+      } as AuditLogRow;
+    });
+  }, [commercial?.sales, clientRegistryByNomeKey]);
+
   return (
     <div className="relative min-h-screen bg-mindlaw-dark">
+      {sessionWarn ? (
+        <div
+          className="fixed inset-x-0 top-0 z-[110] border-b border-amber-400/50 bg-amber-950/90 px-4 py-2 text-center text-xs font-semibold text-amber-100 backdrop-blur-sm"
+          role="status"
+        >
+          A sua sessão expira em breve. Guarde o trabalho em curso ou volte a iniciar sessão após guardar.
+        </div>
+      ) : null}
+
       {toast ? (
-        <div className="fixed right-4 top-4 z-[100] rounded-xl border border-mindlaw-gold/40 bg-mindlaw-teal px-4 py-3 text-sm font-semibold shadow-lg">
-          {toast}
+        <div
+          role={toast.variant === "error" ? "alert" : "status"}
+          aria-live="polite"
+          className={`fixed right-4 top-4 z-[100] flex max-w-md items-start gap-3 rounded-xl border px-4 py-3 text-sm font-semibold shadow-lg ${
+            toast.variant === "error"
+              ? "border-rose-400/50 bg-rose-950/90 text-rose-50"
+              : "border-mindlaw-gold/40 bg-mindlaw-teal text-white"
+          }`}
+        >
+          <span className="flex-1">{toast.msg}</span>
+          {toast.variant === "error" ? (
+            <button
+              type="button"
+              className="shrink-0 rounded-lg border border-white/20 px-2 py-1 text-xs font-semibold hover:bg-white/10"
+              onClick={() => setToast(null)}
+            >
+              Fechar
+            </button>
+          ) : null}
         </div>
       ) : null}
 
@@ -634,6 +831,7 @@ export function DashboardApp() {
           onClick={() => setExportModalOpen(false)}
         >
           <div
+            ref={exportModalRef}
             className="w-full max-w-md rounded-2xl border border-white/10 bg-mindlaw-teal p-6 shadow-2xl"
             role="dialog"
             aria-labelledby="export-modal-title"
@@ -725,7 +923,28 @@ export function DashboardApp() {
 
       <MobileHeader
         onOpenMenu={() => setMobileOpen(true)}
-        trailing={<PeriodFilterPopover startDate={startDate} endDate={endDate} onChange={setPeriod} />}
+        trailing={
+          <div className="flex max-w-[100vw] items-center gap-2 pr-1">
+            <div className="min-w-0 flex-1">
+              <GlobalSearch
+                clients={clientsFull}
+                logRows={logs}
+                onGoClient={(nome) => {
+                  setClientsSearchPrefill(nome);
+                  setTab("clientes");
+                  showToast(`Cliente: ${nome}`);
+                }}
+                onGoLog={(hint, at) => {
+                  setAuditTab(at);
+                  setLogsSearchTerm(hint);
+                  setTab("logs");
+                  showToast("Auditoria aberta com filtro da busca.");
+                }}
+              />
+            </div>
+            <PeriodFilterPopover startDate={startDate} endDate={endDate} onChange={setPeriod} />
+          </div>
+        }
       />
       <Sidebar
         active={tab}
@@ -739,7 +958,24 @@ export function DashboardApp() {
       <div className="lg:flex">
         <DesktopSpacer />
         <main className="flex-1 space-y-8 px-4 py-6 pb-24 lg:px-10 lg:py-10">
-          <div className="flex justify-end lg:sticky lg:top-0 lg:z-20 lg:-mt-2 lg:pb-2">
+          <div className="flex w-full flex-wrap items-center justify-end gap-3 lg:sticky lg:top-0 lg:z-20 lg:-mt-2 lg:pb-2">
+            <div className="hidden min-w-[12rem] max-w-md flex-1 lg:block">
+              <GlobalSearch
+                clients={clientsFull}
+                logRows={logs}
+                onGoClient={(nome) => {
+                  setClientsSearchPrefill(nome);
+                  setTab("clientes");
+                  showToast(`Cliente: ${nome}`);
+                }}
+                onGoLog={(hint, at) => {
+                  setAuditTab(at);
+                  setLogsSearchTerm(hint);
+                  setTab("logs");
+                  showToast("Auditoria aberta com filtro da busca.");
+                }}
+              />
+            </div>
             <div className="hidden lg:block">
               <PeriodFilterPopover startDate={startDate} endDate={endDate} onChange={setPeriod} />
             </div>
@@ -898,12 +1134,20 @@ export function DashboardApp() {
               filters={clientFilters}
               onFiltersChange={(patch) => setClientFilters((f) => ({ ...f, ...patch }))}
               onToast={showToast}
-              onReload={() => void loadCore()}
+              onReload={() => void refreshAll()}
               chartOptsBar={barOpts as Record<string, unknown>}
               chartOptsDough={doughOpts as Record<string, unknown>}
               searchPrefill={clientsSearchPrefill}
               onConsumedSearchPrefill={() => setClientsSearchPrefill(null)}
+              auditCreatePrefill={clientsAuditCreatePrefill}
+              onConsumedAuditCreatePrefill={() => setClientsAuditCreatePrefill(null)}
               onPlanChartAudit={handlePlanChartAudit}
+              auditLogs={logs}
+              onClientCreated={(id) => {
+                setLaunchPrefillId(id);
+                setTab("lancamentos");
+                showToast("Cliente criado! Preencha o lançamento.");
+              }}
             />
           )}
 
@@ -972,6 +1216,63 @@ export function DashboardApp() {
                       )}
                     </article>
                   </div>
+
+                  <article className="mx-auto w-full max-w-6xl rounded-2xl border border-white/10 bg-mindlaw-teal/35 p-5 shadow-lg shadow-black/25 backdrop-blur-md">
+                    <h3 className="mb-1 text-center text-lg font-semibold text-mindlaw-gold">Tabela espelho · comercial</h3>
+                    <p className="mb-4 text-center text-xs text-white/50">
+                      Lançamentos comerciais do período (mesma origem da auditoria).
+                    </p>
+                    {comercialMirrorLogs.length === 0 ? (
+                      <EmptyState message="Sem registos comerciais no período filtrado." className="min-h-[12rem]" />
+                    ) : (
+                      <div className="overflow-x-auto rounded-xl border border-white/10 bg-mindlaw-dark/25">
+                        <table className="w-full min-w-[880px] border-collapse text-left text-sm">
+                          <thead>
+                            <tr className="border-b border-white/15 bg-mindlaw-dark/40 text-[11px] font-semibold uppercase tracking-[0.08em] text-white/55">
+                              <th className="px-3 py-3">Cliente</th>
+                              <th className="px-3 py-3">Data</th>
+                              <th className="px-3 py-3">Plano</th>
+                              <th className="px-3 py-3">Funil</th>
+                              <th className="px-3 py-3">Contrato</th>
+                              <th className="px-3 py-3">Motivo</th>
+                              <th className="px-3 py-3 text-right">Valor</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {comercialMirrorLogs.map((row) => {
+                              const p = row.payload as { motivoPerda?: string; valorContrato?: number } | undefined;
+                              const motivo = p?.motivoPerda || "—";
+                              const valor = Number(p?.valorContrato ?? 0);
+                              const dataStr = row.data
+                                ? new Date(String(row.data)).toLocaleDateString("pt-BR")
+                                : "—";
+                              const st = row.statusContrato;
+                              return (
+                                <tr
+                                  key={row.id}
+                                  className="border-b border-white/5 text-white/85 transition hover:bg-mindlaw-gold/5"
+                                >
+                                  <td className="px-3 py-2.5 font-medium text-white">{row.cliente || "—"}</td>
+                                  <td className="px-3 py-2.5 text-white/75">{dataStr}</td>
+                                  <td className="px-3 py-2.5 text-white/70">{row.plano || "—"}</td>
+                                  <td className="px-3 py-2.5 text-white/75">{row.status || "—"}</td>
+                                  <td className="px-3 py-2.5">
+                                    <span
+                                      className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${clientContractStatusChipClass(st)}`}
+                                    >
+                                      {clientContractStatusLabel(st)}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2.5 text-white/70">{motivo}</td>
+                                  <td className="kpi-mono px-3 py-2.5 text-right text-mindlaw-gold/95">{formatBrl(valor)}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </article>
                 </>
               )}
             </section>
@@ -1161,7 +1462,13 @@ export function DashboardApp() {
           {tab === "lancamentos" && (
             <section className="space-y-6">
               <h2 className="text-center text-2xl font-extrabold md:text-3xl">Lançamentos</h2>
-              <LaunchCenter clients={clientsLaunch} onClientsChange={setClientsLaunch} onToast={showToast} />
+              <LaunchCenter
+                clients={clientsLaunch}
+                onClientsChange={onClientsLaunchChange}
+                onToast={showToast}
+                prefillClientId={launchPrefillId}
+                onPrefillConsumed={clearLaunchPrefill}
+              />
             </section>
           )}
 
@@ -1180,10 +1487,15 @@ export function DashboardApp() {
                 interactiveFilter={interactiveFilter}
                 onInteractiveFilter={setInteractiveFilter}
                 clientRowsForPlano={clientPlanoLookup}
-                onRefresh={loadCore}
+                onRefresh={refreshAll}
                 onToast={showToast}
-                onGoToClients={(name) => {
-                  setClientsSearchPrefill(name);
+                logsTotal={logsInfinite.data?.pages?.[0]?.logsTotal ?? logs.length}
+                logsHasMore={Boolean(logsInfinite.hasNextPage)}
+                onLoadMoreLogs={() => void logsInfinite.fetchNextPage()}
+                isLoadingMoreLogs={logsInfinite.isFetchingNextPage}
+                onGoToClients={(ctx) => {
+                  setClientsSearchPrefill(ctx.nome);
+                  setClientsAuditCreatePrefill(ctx);
                   setTab("clientes");
                 }}
               />

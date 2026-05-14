@@ -10,6 +10,15 @@ import {
 } from "@/lib/logConstants";
 import { buildLegacyCombinedComentarioFromFields, resolveNpsFieldsForEdit } from "@/lib/npsEditClient";
 
+function formatPhoneBr(value: string) {
+  const digits = String(value || "").replace(/\D/g, "").slice(0, 11);
+  if (!digits) return "";
+  if (digits.length <= 2) return `(${digits}`;
+  if (digits.length <= 3) return `(${digits.slice(0, 2)}) ${digits.slice(2)}`;
+  if (digits.length <= 7) return `(${digits.slice(0, 2)}) ${digits.slice(2, 3)} ${digits.slice(3)}`;
+  return `(${digits.slice(0, 2)}) ${digits.slice(2, 3)} ${digits.slice(3, 7)}-${digits.slice(7)}`;
+}
+
 export type AuditLogRow = {
   id: string;
   tipo: string;
@@ -18,6 +27,8 @@ export type AuditLogRow = {
   plano?: string;
   data?: string;
   status?: string;
+  /** `statusContrato` do cadastro de cliente (quando existir), p.ex. tabela espelho comercial. */
+  statusContrato?: string;
   detalhe: string;
   npsNota?: number | null;
   npsColunas?: Record<string, string> | null;
@@ -29,7 +40,7 @@ type Props = {
   relatedPlano?: string;
   onClose: () => void;
   onSaved: () => void;
-  onToast: (msg: string) => void;
+  onToast: (msg: string, variant?: "error") => void;
 };
 
 const planSelectOptions = [
@@ -51,6 +62,7 @@ export function LogEditModal({ row, relatedPlano, onClose, onSaved, onToast }: P
   const [comJust, setComJust] = useState("");
   const [comComp, setComComp] = useState("");
   const [comDetalhe, setComDetalhe] = useState("");
+  const [comTelefone, setComTelefone] = useState("");
   const [comPlano, setComPlano] = useState("");
 
   const [chCliente, setChCliente] = useState("");
@@ -58,11 +70,13 @@ export function LogEditModal({ row, relatedPlano, onClose, onSaved, onToast }: P
   const [chValor, setChValor] = useState(0);
   const [chMotivo, setChMotivo] = useState("Sem Motivo");
   const [chJust, setChJust] = useState("");
+  const [chTelefone, setChTelefone] = useState("");
   const [chPlano, setChPlano] = useState("");
 
   const [npsCliente, setNpsCliente] = useState("");
   const [npsData, setNpsData] = useState("");
   const [npsNota, setNpsNota] = useState("");
+  const [npsTelefone, setNpsTelefone] = useState("");
   const [npsPlano, setNpsPlano] = useState("");
   const [npsFields, setNpsFields] = useState({
     npsMelhorarExperiencia: "",
@@ -85,19 +99,24 @@ export function LogEditModal({ row, relatedPlano, onClose, onSaved, onToast }: P
       setComJust(String(p.funcionalidadeFaltante || ""));
       setComComp(String(p.competidor || ""));
       setComDetalhe(String(p.detalhamentoTecnico || ""));
-      setComPlano(mapPlanToOption(String(relatedPlano || row.plano || "")));
+      setComTelefone(formatPhoneBr(String((p as { telefone?: string }).telefone || "")));
+      setComPlano(
+        mapPlanToOption(String((p as { plano?: string }).plano || relatedPlano || row.plano || ""))
+      );
     } else if (row.origem === "churn") {
       setChCliente(String(p.cliente || row.cliente || ""));
       setChData(p.dataChurn ? String(p.dataChurn).slice(0, 10) : "");
       setChValor(Number(p.valorPerdido ?? 0));
       setChMotivo(String(p.motivoPrincipal || "Sem Motivo"));
       setChJust(String(p.funcionalidadeFaltante || ""));
-      setChPlano(mapPlanToOption(String(relatedPlano || row.plano || "")));
+      setChTelefone(formatPhoneBr(String((p as { telefone?: string }).telefone || "")));
+      setChPlano(mapPlanToOption(String((p as { plano?: string }).plano || relatedPlano || row.plano || "")));
     } else if (row.origem === "nps") {
       setNpsCliente(String(p.cliente || row.cliente || ""));
       setNpsData(p.dataNPS ? String(p.dataNPS).slice(0, 10) : "");
       setNpsNota(String(p.notaNPS ?? ""));
-      setNpsPlano(mapPlanToOption(String(relatedPlano || row.plano || "")));
+      setNpsTelefone(formatPhoneBr(String((p as { telefone?: string }).telefone || "")));
+      setNpsPlano(mapPlanToOption(String((p as { plano?: string }).plano || relatedPlano || row.plano || "")));
       setNpsFields(resolveNpsFieldsForEdit(row));
     }
   }, [row, relatedPlano]);
@@ -127,7 +146,8 @@ export function LogEditModal({ row, relatedPlano, onClose, onSaved, onToast }: P
             justificativaMotivo: comJust.trim(),
             funcionalidadeFaltante: comJust.trim(),
             competidor: comComp.trim(),
-            detalhamentoTecnico: comDetalhe.trim()
+            detalhamentoTecnico: comDetalhe.trim(),
+            telefone: comTelefone.trim()
           })
         });
       } else if (row.origem === "churn") {
@@ -144,7 +164,8 @@ export function LogEditModal({ row, relatedPlano, onClose, onSaved, onToast }: P
             motivoPrincipal: chMotivo,
             justificativaMotivo: chJust.trim(),
             funcionalidadeFaltante: chJust.trim(),
-            plano: chPlano
+            plano: chPlano,
+            telefone: chTelefone.trim()
           })
         });
       } else if (row.origem === "nps") {
@@ -158,7 +179,8 @@ export function LogEditModal({ row, relatedPlano, onClose, onSaved, onToast }: P
             notaNPS: npsNota,
             comentarioNPS,
             ...npsFields,
-            plano: npsPlano
+            plano: npsPlano,
+            telefone: npsTelefone.trim()
           })
         });
       } else {
@@ -168,7 +190,7 @@ export function LogEditModal({ row, relatedPlano, onClose, onSaved, onToast }: P
       onSaved();
       onClose();
     } catch (e) {
-      onToast((e as Error).message);
+      onToast((e as Error).message, "error");
     } finally {
       setSaving(false);
     }
@@ -198,6 +220,18 @@ export function LogEditModal({ row, relatedPlano, onClose, onSaved, onToast }: P
               <input
                 value={comCliente}
                 onChange={(e) => setComCliente(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
+              />
+            </label>
+            <label className="block text-xs text-white/65">
+              Telefone (lançamento)
+              <input
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                value={comTelefone}
+                onChange={(e) => setComTelefone(formatPhoneBr(e.target.value))}
+                maxLength={16}
                 className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
               />
             </label>
@@ -302,6 +336,18 @@ export function LogEditModal({ row, relatedPlano, onClose, onSaved, onToast }: P
                 className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
               />
             </label>
+            <label className="block text-xs text-white/65">
+              Telefone (lançamento)
+              <input
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                value={chTelefone}
+                onChange={(e) => setChTelefone(formatPhoneBr(e.target.value))}
+                maxLength={16}
+                className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
+              />
+            </label>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="block text-xs text-white/65">
                 Data churn
@@ -371,6 +417,18 @@ export function LogEditModal({ row, relatedPlano, onClose, onSaved, onToast }: P
               <input
                 value={npsCliente}
                 onChange={(e) => setNpsCliente(e.target.value)}
+                className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
+              />
+            </label>
+            <label className="block text-xs text-white/65">
+              Telefone (lançamento)
+              <input
+                type="tel"
+                inputMode="numeric"
+                autoComplete="tel"
+                value={npsTelefone}
+                onChange={(e) => setNpsTelefone(formatPhoneBr(e.target.value))}
+                maxLength={16}
                 className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
               />
             </label>

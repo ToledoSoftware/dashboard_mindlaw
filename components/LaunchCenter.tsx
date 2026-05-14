@@ -1,21 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import { Loader2 } from "lucide-react";
+import { mindlawJson } from "@/lib/mindlawFetch";
+import { findClientNameDuplicate } from "@/lib/clientDuplicateHint";
 
-export type ClientRow = { _id: string; nome: string; plano?: string };
+export type ClientRow = { _id: string; nome: string; plano?: string; telefone?: string; statusContrato?: string };
 
 const NEW = "__novo_cliente__";
 
 type RegistroTipo = "comercial" | "churn" | "nps";
-
-function authHeaders(): HeadersInit {
-  const token = typeof window !== "undefined" ? localStorage.getItem("mindlaw_token") : null;
-  return {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
-  };
-}
 
 function formatPhoneBr(value: string) {
   const digits = String(value || "").replace(/\D/g, "").slice(0, 11);
@@ -30,26 +25,28 @@ function hasValidPhoneBr(value: string) {
   return String(value || "").replace(/\D/g, "").length === 11;
 }
 
-async function apiJson(url: string, init?: RequestInit) {
-  const res = await fetch(url, { credentials: "include", ...init, headers: { ...authHeaders(), ...init?.headers } });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    if (res.status === 401) {
-      localStorage.removeItem("mindlaw_token");
-      window.location.href = "/login";
-    }
-    throw new Error(data.error || "Erro na requisição.");
-  }
-  return data;
-}
-
 type LaunchCenterProps = {
   clients: ClientRow[];
-  onClientsChange: (list: ClientRow[]) => void;
+  onClientsChange: Dispatch<SetStateAction<ClientRow[]>>;
   onToast: (msg: string) => void;
+  prefillClientId?: string | null;
+  onPrefillConsumed?: () => void;
 };
 
-export function LaunchCenter({ clients, onClientsChange, onToast }: LaunchCenterProps) {
+function clientIdFromDoc(doc: Record<string, unknown> | null | undefined): string {
+  if (!doc) return "";
+  const raw = doc._id ?? doc.id;
+  if (raw && typeof raw === "object" && "toString" in raw) return String((raw as { toString: () => string }).toString());
+  return raw != null ? String(raw) : "";
+}
+
+export function LaunchCenter({
+  clients,
+  onClientsChange,
+  onToast,
+  prefillClientId = null,
+  onPrefillConsumed
+}: LaunchCenterProps) {
   const [tipo, setTipo] = useState<RegistroTipo>("comercial");
   const [clienteId, setClienteId] = useState("");
   const [showNovo, setShowNovo] = useState(false);
@@ -83,6 +80,13 @@ export function LaunchCenter({ clients, onClientsChange, onToast }: LaunchCenter
     return m;
   }, [clients]);
 
+  useEffect(() => {
+    if (!prefillClientId) return;
+    setClienteId(prefillClientId);
+    setShowNovo(false);
+    onPrefillConsumed?.();
+  }, [prefillClientId, onPrefillConsumed]);
+
   function resetForms() {
     setSaleData("");
     setSaleValor("");
@@ -107,9 +111,9 @@ export function LaunchCenter({ clients, onClientsChange, onToast }: LaunchCenter
     setNovoPlano("");
   }
 
-  async function salvarNovoCliente(): Promise<string | null> {
-    const nome = novoNome.trim();
-    if (!nome) {
+  async function salvarNovoCliente(): Promise<{ id: string; nome: string } | null> {
+    const nomeInput = novoNome.trim();
+    if (!nomeInput) {
       onToast("Informe o nome do cliente.");
       return null;
     }
@@ -117,15 +121,36 @@ export function LaunchCenter({ clients, onClientsChange, onToast }: LaunchCenter
       onToast("Telefone inválido. Use (xx) x xxxx-xxxx.");
       return null;
     }
-    const r = await apiJson("/api/clients", {
+    const dup = findClientNameDuplicate(clients, nomeInput);
+    if (dup && !window.confirm(`Já existe cliente com o mesmo nome normalizado: "${dup}". Continuar?`)) {
+      return null;
+    }
+    const r = await mindlawJson<{ data?: Record<string, unknown> }>("/api/clients", {
       method: "POST",
-      body: JSON.stringify({ nome, plano: novoPlano || "", telefone: novoTelefone.trim() })
+      body: JSON.stringify({ nome: nomeInput, plano: novoPlano || "", telefone: novoTelefone.trim() })
     });
-    const doc = r.data;
-    const row: ClientRow = { _id: String(doc._id), nome: doc.nome, plano: doc.plano };
-    onClientsChange([...clients, row].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR")));
+    const doc = (r?.data ?? r) as Record<string, unknown> | undefined;
+    const id = clientIdFromDoc(doc);
+    const nomeExact = String(doc?.nome ?? nomeInput).trim();
+    if (!id) {
+      onToast("Resposta inválida do servidor ao criar cliente (sem ID).");
+      return null;
+    }
+    const row: ClientRow = {
+      _id: id,
+      nome: nomeExact,
+      plano: doc?.plano != null ? String(doc.plano) : undefined,
+      telefone: doc?.telefone != null ? String(doc.telefone) : novoTelefone.trim() || undefined,
+      statusContrato: doc?.statusContrato != null ? String(doc.statusContrato) : "novo_lead"
+    };
+    onClientsChange((prev) => {
+      const without = prev.filter((c) => c._id !== id);
+      return [...without, row].sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+    });
+    setClienteId(id);
+    setShowNovo(false);
     onToast("Cliente cadastrado.");
-    return String(doc._id);
+    return { id, nome: nomeExact };
   }
 
   async function handleSalvar() {
@@ -135,13 +160,13 @@ export function LaunchCenter({ clients, onClientsChange, onToast }: LaunchCenter
       let nome = "";
 
       if (idRef === NEW) {
-        const createdId = await salvarNovoCliente();
-        if (!createdId) {
+        const created = await salvarNovoCliente();
+        if (!created) {
           setSaving(false);
           return;
         }
-        idRef = createdId;
-        nome = novoNome.trim();
+        idRef = created.id;
+        nome = created.nome;
       } else {
         if (!idRef) {
           onToast("Selecione um cliente.");
@@ -157,6 +182,9 @@ export function LaunchCenter({ clients, onClientsChange, onToast }: LaunchCenter
         return;
       }
 
+      const selSupport = idRef && idRef !== NEW ? clients.find((c) => c._id === idRef) : undefined;
+      const telefoneLancamento = (novoTelefone.trim() || String(selSupport?.telefone || "")).trim();
+
       if (tipo === "comercial") {
         const precisa = ["Falta de Funcionalidade", "Falta de Integracao", "Outros"].includes(saleMotivo);
         if (precisa && !saleJust.trim()) {
@@ -164,7 +192,7 @@ export function LaunchCenter({ clients, onClientsChange, onToast }: LaunchCenter
           setSaving(false);
           return;
         }
-        await apiJson("/api/sales", {
+        await mindlawJson("/api/sales", {
           method: "POST",
           body: JSON.stringify({
             cliente: nome,
@@ -174,6 +202,7 @@ export function LaunchCenter({ clients, onClientsChange, onToast }: LaunchCenter
             motivoPerda: saleMotivo,
             justificativaMotivo: saleJust,
             plano: salePlano,
+            telefone: telefoneLancamento,
             competidor: saleComp,
             detalhamentoTecnico: saleDet
           })
@@ -186,7 +215,7 @@ export function LaunchCenter({ clients, onClientsChange, onToast }: LaunchCenter
           setSaving(false);
           return;
         }
-        await apiJson("/api/support/churn", {
+        await mindlawJson("/api/support/churn", {
           method: "POST",
           body: JSON.stringify({
             cliente: nome,
@@ -194,7 +223,8 @@ export function LaunchCenter({ clients, onClientsChange, onToast }: LaunchCenter
             valorPerdido: Number(churnValor || 0),
             motivoPrincipal: churnMotivo,
             justificativaMotivo: churnJust,
-            plano: churnPlano
+            plano: churnPlano,
+            telefone: telefoneLancamento
           })
         });
         onToast("Churn registrado.");
@@ -205,14 +235,15 @@ export function LaunchCenter({ clients, onClientsChange, onToast }: LaunchCenter
           setSaving(false);
           return;
         }
-        await apiJson("/api/support/nps", {
+        await mindlawJson("/api/support/nps", {
           method: "POST",
           body: JSON.stringify({
             cliente: nome,
             dataNPS: npsData || new Date().toISOString().slice(0, 10),
             notaNPS: n,
             comentarioNPS: npsComent,
-            plano: ""
+            plano: "",
+            telefone: telefoneLancamento
           })
         });
         onToast("Feedback NPS salvo.");

@@ -19,6 +19,18 @@ export function verifyToken(token: string): JwtUser | null {
   }
 }
 
+/** `exp` em ms desde epoch, se presente no JWT (após verificação opcional via decode). */
+export function getTokenExpiryMs(token: string | null): number | null {
+  if (!token) return null;
+  try {
+    const d = jwt.decode(token) as { exp?: number } | null;
+    if (!d?.exp || typeof d.exp !== "number") return null;
+    return d.exp * 1000;
+  } catch {
+    return null;
+  }
+}
+
 export function requireUser(req: NextRequest): JwtUser | Response {
   if (!process.env.JWT_SECRET) {
     return Response.json({ error: "JWT_SECRET não configurado." }, { status: 503 });

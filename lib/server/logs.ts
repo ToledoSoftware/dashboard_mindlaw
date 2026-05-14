@@ -14,7 +14,7 @@ export async function getLogs(query: Record<string, string | undefined>) {
   const [salesRaw, support, clients] = await Promise.all([
     Sale.find().sort({ createdAt: -1 }).lean(),
     Support.find().sort({ createdAt: -1 }).lean(),
-    Client.find({}).select("nome plano").lean()
+    Client.find({}).select("nome plano telefone statusContrato").lean()
   ]);
   const clientPlanByName = new Map(
     clients.map((client: { nome: string; plano?: string }) => [normalizeNameKey(client.nome), client.plano || ""])
@@ -23,37 +23,51 @@ export async function getLogs(query: Record<string, string | undefined>) {
   const sales = filterSalesByRange(filterDuplicatedLostSales(salesRaw, support), range);
   const supportFiltered = filterSupportByRange(support, range);
 
-  const logs = [
-    ...sales.map((item: Record<string, unknown>) => ({
-      id: String(item._id || ""),
-      origem: "comercial",
-      tipo: "Comercial",
-      cliente: item.cliente,
-      plano: clientPlanByName.get(normalizeNameKey(item.cliente as string)) || "",
-      data: item.data,
-      status: item.status,
-      detalhe: formatDetalheMotivo(item.motivoPerda as string, item.funcionalidadeFaltante as string),
-      payload: {
+  const sorted = [
+    ...sales.map((item: Record<string, unknown>) => {
+      const nomeKey = normalizeNameKey(item.cliente as string);
+      const snapPlano = String(item.plano || "").trim();
+      const snapTel = String(item.telefone || "").trim();
+      const planoJoined = clientPlanByName.get(nomeKey) || "";
+      const planoDisplay = snapPlano || planoJoined;
+      return {
+        id: String(item._id || ""),
+        origem: "comercial",
+        tipo: "Comercial",
         cliente: item.cliente,
+        plano: planoDisplay,
         data: item.data,
-        valorContrato: item.valorContrato || 0,
-        status: item.status || "Em Negociacao",
-        motivoPerda: item.motivoPerda || "Sem Motivo",
-        funcionalidadeFaltante: item.funcionalidadeFaltante || "",
-        detalhamentoTecnico: item.detalhamentoTecnico || "",
-        competidor: item.competidor || ""
-      }
-    })),
+        status: item.status,
+        detalhe: formatDetalheMotivo(item.motivoPerda as string, item.funcionalidadeFaltante as string),
+        payload: {
+          cliente: item.cliente,
+          data: item.data,
+          valorContrato: item.valorContrato || 0,
+          status: item.status || "Em Negociacao",
+          motivoPerda: item.motivoPerda || "Sem Motivo",
+          funcionalidadeFaltante: item.funcionalidadeFaltante || "",
+          detalhamentoTecnico: item.detalhamentoTecnico || "",
+          competidor: item.competidor || "",
+          telefone: snapTel,
+          plano: snapPlano || planoJoined
+        }
+      };
+    }),
     ...supportFiltered.map((item: Record<string, unknown>) => {
       const isNps = classifySupport(item) === "nps";
       const cat = isNps ? deriveCategoriaNps(item) : "";
       const npsCols = isNps ? buildNpsColumnMap(item) : null;
+      const nomeKey = normalizeNameKey(item.cliente as string);
+      const snapPlano = String(item.plano || "").trim();
+      const snapTel = String(item.telefone || "").trim();
+      const planoJoined = clientPlanByName.get(nomeKey) || "";
+      const planoDisplay = snapPlano || planoJoined;
       return {
         id: String(item._id || ""),
         origem: classifySupport(item),
         tipo: isNps ? "NPS" : "Churn",
         cliente: item.cliente,
-        plano: clientPlanByName.get(normalizeNameKey(item.cliente as string)) || "",
+        plano: planoDisplay,
         data: item.dataChurn || item.dataNPS || item.createdAt,
         status: isNps ? cat || "NPS" : "Churn",
         detalhe: isNps
@@ -73,7 +87,9 @@ export async function getLogs(query: Record<string, string | undefined>) {
               npsAreasMelhorar: item.npsAreasMelhorar || "",
               npsExperienciaAteAqui: item.npsExperienciaAteAqui || "",
               npsFuncionalidadeDiaadia: item.npsFuncionalidadeDiaadia || "",
-              npsComentarioAdicional: item.npsComentarioAdicional || ""
+              npsComentarioAdicional: item.npsComentarioAdicional || "",
+              telefone: snapTel,
+              plano: snapPlano || planoJoined
             }
           : {
               registerType: "churn",
@@ -81,13 +97,28 @@ export async function getLogs(query: Record<string, string | undefined>) {
               dataChurn: item.dataChurn || null,
               valorPerdido: item.valorPerdido || 0,
               motivoPrincipal: item.motivoPrincipal || "Sem Motivo",
-              funcionalidadeFaltante: item.funcionalidadeFaltante || ""
+              funcionalidadeFaltante: item.funcionalidadeFaltante || "",
+              telefone: snapTel,
+              plano: snapPlano || planoJoined
             }
       };
     })
   ].sort((a, b) => new Date((b as { data?: string }).data || 0).getTime() - new Date((a as { data?: string }).data || 0).getTime());
 
-  return { logs };
+  const logsTotal = sorted.length;
+  const limitRaw = query.logsLimit != null && query.logsLimit !== "" ? parseInt(String(query.logsLimit), 10) : NaN;
+  const offsetRaw = query.logsOffset != null && query.logsOffset !== "" ? parseInt(String(query.logsOffset), 10) : NaN;
+  const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 500) : 0;
+  const offset = Number.isFinite(offsetRaw) ? Math.max(0, offsetRaw) : 0;
+
+  if (limit > 0) {
+    const pageLogs = sorted.slice(offset, offset + limit);
+    const logsHasMore = offset + pageLogs.length < logsTotal;
+    const nextOffset = logsHasMore ? offset + pageLogs.length : undefined;
+    return { logs: pageLogs, logsTotal, logsHasMore, nextOffset };
+  }
+
+  return { logs: sorted, logsTotal, logsHasMore: false, nextOffset: undefined };
 }
 
 export async function getDataBundle(query: Record<string, string | undefined>) {

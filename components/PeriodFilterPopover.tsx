@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CalendarRange } from "lucide-react";
-import { monthRangeToDates } from "@/lib/dashboardQuery";
+import { formatLocalDateYMD, monthRangeToDates } from "@/lib/dashboardQuery";
 
 export type PeriodFilterPopoverProps = {
   startDate: string;
@@ -17,6 +17,34 @@ function parseParts(ymd: string) {
 }
 
 const MESES = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
+function presetThisMonth(): { startDate: string; endDate: string } {
+  const n = new Date();
+  return monthRangeToDates(n.getMonth() + 1, n.getFullYear(), n.getMonth() + 1, n.getFullYear());
+}
+
+function presetThisQuarter(): { startDate: string; endDate: string } {
+  const n = new Date();
+  const q = Math.floor(n.getMonth() / 3);
+  const sm = q * 3 + 1;
+  const sy = n.getFullYear();
+  return monthRangeToDates(sm, sy, sm + 2, sy);
+}
+
+function presetLast90Days(): { startDate: string; endDate: string } {
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 89);
+  return { startDate: formatLocalDateYMD(start), endDate: formatLocalDateYMD(end) };
+}
+
+function presetThisYear(): { startDate: string; endDate: string } {
+  const y = new Date().getFullYear();
+  return monthRangeToDates(1, y, 12, y);
+}
+
+const presetBtnClass =
+  "rounded-lg border border-white/12 bg-mindlaw-dark/40 px-2 py-1.5 text-[11px] font-semibold text-white/80 hover:border-mindlaw-gold/40 hover:text-mindlaw-gold";
 
 export function PeriodFilterPopover({ startDate, endDate, onChange }: PeriodFilterPopoverProps) {
   const [open, setOpen] = useState(false);
@@ -72,6 +100,27 @@ export function PeriodFilterPopover({ startDate, endDate, onChange }: PeriodFilt
           aria-label="Filtro de período"
           onClick={(e) => e.stopPropagation()}
         >
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-white/50">Presets de período</p>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className={presetBtnClass}
+              onClick={() => {
+                onChange(presetThisMonth());
+              }}
+            >
+              Mês atual
+            </button>
+            <button type="button" className={presetBtnClass} onClick={() => onChange(presetThisQuarter())}>
+              Trimestre atual
+            </button>
+            <button type="button" className={presetBtnClass} onClick={() => onChange(presetLast90Days())}>
+              Últimos 90 dias
+            </button>
+            <button type="button" className={presetBtnClass} onClick={() => onChange(presetThisYear())}>
+              Ano atual
+            </button>
+          </div>
           <p className="mb-3 text-xs font-semibold uppercase tracking-[0.12em] text-white/50">Intervalo (mês/ano)</p>
           <div className="flex flex-col gap-3">
             <div className="flex flex-wrap items-end gap-2">

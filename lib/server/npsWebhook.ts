@@ -81,10 +81,16 @@ export async function saveNpsIntegration(
     notaNPS: parsed.value.notaNPS,
     comentarioNPS: parsed.value.comentarioNPS,
     dataNPS: parsed.value.dataNPS,
+    telefone: String(body?.telefone || "").trim(),
+    plano: String(body?.plano || "").trim(),
     ...structured
   });
 
-  await ensureClientByName(parsed.value.cliente, { plano: String(body?.plano || "").trim() });
+  await ensureClientByName(parsed.value.cliente, {
+    plano: String(body?.plano || "").trim(),
+    telefone: String(body?.telefone || "").trim(),
+    dataReferencia: parsed.value.dataNPS
+  });
 
   return { data: support, status: 201 };
 }

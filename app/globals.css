@@ -28,3 +28,10 @@ body {
 .glass-card {
   @apply rounded-2xl border border-white/10 bg-mindlaw-teal/90 shadow-lg backdrop-blur-md;
 }
+
+button:focus-visible,
+a:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid rgba(197, 160, 89, 0.9);
+  outline-offset: 2px;
+}

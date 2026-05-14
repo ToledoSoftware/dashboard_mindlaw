@@ -32,7 +32,6 @@ export async function POST(req: Request) {
     );
 
     const res = NextResponse.json({
-      token,
       user: { id: user._id, username: user.username, role: user.role }
     });
     res.cookies.set("mindlaw_token", token, {

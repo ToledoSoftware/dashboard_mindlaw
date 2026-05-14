@@ -1,13 +1,19 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useState, type FormEvent } from "react";
+import { Eye, EyeOff, Loader2 } from "lucide-react";
 
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const el = document.querySelector<HTMLInputElement>('input[name="username"]');
+    el?.focus();
+  }, []);
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -21,11 +27,22 @@ export default function LoginPage() {
         body: JSON.stringify({ username, password })
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Falha no login.");
-      if (data.token) localStorage.setItem("mindlaw_token", data.token);
+      if (!res.ok) {
+        const msg =
+          res.status === 401
+            ? "Usuário ou senha inválidos."
+            : res.status >= 500
+              ? "Serviço indisponível. Tente mais tarde."
+              : (data as { error?: string }).error || "Falha no login.";
+        throw new Error(msg);
+      }
       window.location.href = "/";
     } catch (err) {
-      setError((err as Error).message);
+      if ((err as Error).name === "TypeError") {
+        setError("Sem ligação à rede ou ao servidor.");
+      } else {
+        setError((err as Error).message);
+      }
     } finally {
       setLoading(false);
     }
@@ -39,33 +56,53 @@ export default function LoginPage() {
           <h1 className="text-xl font-bold text-mindlaw-gold">MindLaw</h1>
           <p className="text-center text-sm text-white/60">Acesse o centro de controle</p>
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4" noValidate>
           <label className="block text-xs font-semibold uppercase tracking-wide text-white/55">
             Usuário
             <input
+              name="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
               autoComplete="username"
+              required
+              aria-required="true"
               className="mt-2 min-h-[48px] w-full rounded-xl border border-white/15 bg-mindlaw-dark/60 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-mindlaw-gold/40"
             />
           </label>
           <label className="block text-xs font-semibold uppercase tracking-wide text-white/55">
             Senha
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              className="mt-2 min-h-[48px] w-full rounded-xl border border-white/15 bg-mindlaw-dark/60 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-mindlaw-gold/40"
-            />
+            <span className="relative mt-2 flex">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+                aria-required="true"
+                className="min-h-[48px] w-full rounded-xl border border-white/15 bg-mindlaw-dark/60 py-2 pl-3 pr-12 text-sm outline-none focus:ring-2 focus:ring-mindlaw-gold/40"
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg p-2 text-white/60 hover:bg-white/10 hover:text-mindlaw-gold"
+                onClick={() => setShowPassword((v) => !v)}
+              >
+                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+              </button>
+            </span>
           </label>
-          {error ? <p className="text-sm text-red-400">{error}</p> : null}
+          {error ? (
+            <p className="text-sm text-red-400" role="alert">
+              {error}
+            </p>
+          ) : null}
           <button
             type="submit"
             disabled={loading}
             className="flex min-h-[48px] w-full items-center justify-center gap-2 rounded-xl bg-mindlaw-gold py-3 text-sm font-bold text-mindlaw-dark hover:bg-mindlaw-gold/90 disabled:opacity-60"
           >
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
             Entrar
           </button>
         </form>

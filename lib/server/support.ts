@@ -51,15 +51,23 @@ export async function postSupport(payload: Record<string, unknown>) {
     notaNPS:
       payload.notaNPS !== undefined && payload.notaNPS !== "" ? Number(payload.notaNPS) : undefined,
     comentarioNPS: payload.comentarioNPS || "",
-    dataNPS: payload.dataNPS || null
+    dataNPS: payload.dataNPS || null,
+    telefone: String(payload.telefone || "").trim(),
+    plano: String(payload.plano || "").trim()
   });
   if (registerType === "churn") {
     await ensureClientByName(payload.cliente as string, {
       statusContrato: "cancelado",
-      plano: (payload.plano as string) || ""
+      plano: (payload.plano as string) || "",
+      telefone: String(payload.telefone || "").trim(),
+      dataReferencia: payload.dataChurn
     });
   } else {
-    await ensureClientByName(payload.cliente as string, { plano: (payload.plano as string) || "" });
+    await ensureClientByName(payload.cliente as string, {
+      plano: (payload.plano as string) || "",
+      telefone: String(payload.telefone || "").trim(),
+      dataReferencia: payload.dataNPS
+    });
   }
   return { data: support, status: 201 };
 }
@@ -76,11 +84,15 @@ export async function postSupportChurn(payload: Record<string, unknown>) {
     valorPerdido: Number(payload.valorPerdido || 0),
     dataChurn: payload.dataChurn || null,
     motivoPrincipal: payload.motivoPrincipal || "Sem Motivo",
-    funcionalidadeFaltante: justificativaMotivo
+    funcionalidadeFaltante: justificativaMotivo,
+    telefone: String(payload.telefone || "").trim(),
+    plano: String(payload.plano || "").trim()
   });
   await ensureClientByName(payload.cliente as string, {
     statusContrato: "cancelado",
-    plano: (payload.plano as string) || ""
+    plano: (payload.plano as string) || "",
+    telefone: String(payload.telefone || "").trim(),
+    dataReferencia: payload.dataChurn
   });
   return { data: support, status: 201 };
 }
@@ -94,9 +106,15 @@ export async function postSupportNps(payload: Record<string, unknown>) {
     notaNPS: Number(payload.notaNPS),
     comentarioNPS: String(payload.comentarioNPS || "").slice(0, 10000),
     dataNPS: payload.dataNPS || null,
+    telefone: String(payload.telefone || "").trim(),
+    plano: String(payload.plano || "").trim(),
     ...structured
   });
-  await ensureClientByName(payload.cliente as string, { plano: (payload.plano as string) || "" });
+  await ensureClientByName(payload.cliente as string, {
+    plano: (payload.plano as string) || "",
+    telefone: String(payload.telefone || "").trim(),
+    dataReferencia: payload.dataNPS
+  });
   return { data: support, status: 201 };
 }
 
@@ -121,6 +139,8 @@ export async function putSupport(id: string, payload: Record<string, unknown>) {
   }
   if (payload.comentarioNPS !== undefined) support.comentarioNPS = (payload.comentarioNPS || "") as string;
   if (payload.dataNPS !== undefined) support.dataNPS = (payload.dataNPS || null) as Date | null;
+  if (payload.telefone !== undefined) support.telefone = String(payload.telefone || "").trim() as string;
+  if (payload.plano !== undefined) support.plano = String(payload.plano || "").trim() as string;
   if (
     payload.npsMelhorarExperiencia !== undefined ||
     payload.npsFaltouNota9 !== undefined ||
@@ -144,13 +164,17 @@ export async function putSupport(id: string, payload: Record<string, unknown>) {
     support.npsComentarioAdicional = s.npsComentarioAdicional;
   }
   await support.save();
+  const extra: Record<string, unknown> = {};
+  if (payload.plano !== undefined) extra.plano = String(payload.plano || "");
+  if (payload.telefone !== undefined) extra.telefone = String(payload.telefone || "").trim();
   if (support.registerType === "churn") {
     await ensureClientByName(support.cliente, {
       statusContrato: "cancelado",
-      plano: (payload.plano as string) || ""
+      dataReferencia: support.dataChurn,
+      ...extra
     });
   } else {
-    await ensureClientByName(support.cliente, { plano: (payload.plano as string) || "" });
+    await ensureClientByName(support.cliente, { dataReferencia: support.dataNPS, ...extra });
   }
   return { data: support, status: 200 };
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Bar, Doughnut } from "react-chartjs-2";
 import type { ChartOptions } from "chart.js";
 import { mindlawJson } from "@/lib/mindlawFetch";
@@ -17,6 +17,13 @@ import { normalizeText } from "@/lib/stringUtils";
 import { copyToClipboard } from "@/lib/copyToClipboard";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonCard, SkeletonChart } from "@/components/SkeletonCard";
+import type { AuditLogRow, AuditNavigateToClientPayload } from "@/components/LogsAuditPanel";
+import { Plus } from "lucide-react";
+import { useDebouncedValue } from "@/lib/useDebouncedValue";
+import { useFocusTrap } from "@/lib/useFocusTrap";
+import { findClientNameDuplicate } from "@/lib/clientDuplicateHint";
+import { mapPlanToOption } from "@/lib/logConstants";
+import { clientContractStatusChipClass } from "@/lib/clientContractStatus";
 
 const STATUS_ORDER = ["cliente", "pagamento_pendente", "pagamento_recusado", "cancelado", "novo_lead"] as const;
 const PLAN_ORDER = ["starter", "premium", "advanced", "outros", "sem_plano"] as const;
@@ -35,6 +42,14 @@ const PLAN_COLORS: Record<string, string> = {
   sem_plano: "#6b7280"
 };
 
+const CLIENT_PLANO_FORM_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "Sem plano" },
+  { value: "Starter", label: "Starter" },
+  { value: "Premium", label: "Premium" },
+  { value: "Advanced", label: "Advanced" },
+  { value: "Outros", label: "Outros" }
+];
+
 function formatPhoneBr(value: string) {
   const digits = String(value || "").replace(/\D/g, "").slice(0, 11);
   if (!digits) return "";
@@ -46,23 +61,6 @@ function formatPhoneBr(value: string) {
 
 function hasValidPhoneBr(value: string) {
   return String(value || "").replace(/\D/g, "").length === 11;
-}
-
-function clientStatusChipClass(st: string) {
-  switch (st) {
-    case "cliente":
-      return "border border-emerald-400/50 bg-emerald-500/25 text-emerald-100";
-    case "pagamento_pendente":
-      return "border border-amber-400/50 bg-amber-500/25 text-amber-50";
-    case "pagamento_recusado":
-      return "border border-orange-400/50 bg-orange-600/25 text-orange-100";
-    case "cancelado":
-      return "border border-rose-400/50 bg-rose-500/25 text-rose-100";
-    case "novo_lead":
-      return "border border-sky-400/50 bg-sky-500/25 text-sky-100";
-    default:
-      return "border border-white/15 bg-white/10 text-mindlaw-gold";
-  }
 }
 
 function includesSearch(client: Record<string, unknown>, term: string) {
@@ -105,14 +103,18 @@ type Props = {
     sortDir: string;
   };
   onFiltersChange: (patch: Partial<Props["filters"]>) => void;
-  onToast: (msg: string) => void;
-  onReload: () => void;
+  onToast: (msg: string, variant?: "error") => void;
+  onReload: () => void | Promise<void>;
   chartOptsBar: Record<string, unknown>;
   chartOptsDough: Record<string, unknown>;
   searchPrefill?: string | null;
   onConsumedSearchPrefill?: () => void;
+  auditCreatePrefill?: AuditNavigateToClientPayload | null;
+  onConsumedAuditCreatePrefill?: () => void;
   onPlanChartAudit?: (planKey: string) => void;
   isLoading?: boolean;
+  onClientCreated?: (id: string) => void;
+  auditLogs?: AuditLogRow[];
 };
 
 export function ClientsPanel({
@@ -127,14 +129,25 @@ export function ClientsPanel({
   chartOptsDough,
   searchPrefill,
   onConsumedSearchPrefill,
+  auditCreatePrefill,
+  onConsumedAuditCreatePrefill,
   onPlanChartAudit,
-  isLoading = false
+  isLoading = false,
+  onClientCreated,
+  auditLogs = []
 }: Props) {
   const [clientSearch, setClientSearch] = useState("");
+  const clientSearchDebounced = useDebouncedValue(clientSearch, 260);
   const [clientStage, setClientStage] = useState("");
   const [clientsPage, setClientsPage] = useState(1);
   const [clientsPageSize, setClientsPageSize] = useState(25);
   const [editId, setEditId] = useState<string | null>(null);
+  const [isCreatingClient, setIsCreatingClient] = useState(false);
+  const createModalRef = useRef<HTMLDivElement>(null);
+  const editModalRef = useRef<HTMLDivElement>(null);
+
+  useFocusTrap(isCreatingClient, createModalRef, () => setIsCreatingClient(false));
+  useFocusTrap(Boolean(editId), editModalRef, () => setEditId(null));
 
   useEffect(() => {
     if (searchPrefill != null && searchPrefill !== "") {
@@ -144,6 +157,29 @@ export function ClientsPanel({
     }
   }, [searchPrefill, onConsumedSearchPrefill]);
 
+  useEffect(() => {
+    const hint = auditCreatePrefill;
+    if (!hint?.nome?.trim()) return;
+    if (isLoading) return;
+    const key = normalizeText(hint.nome);
+    const exists = clientsRaw.some((c) => normalizeText(String(c.nome || "")) === key);
+    if (exists) {
+      onConsumedAuditCreatePrefill?.();
+      return;
+    }
+    setCreateForm({
+      nome: hint.nome.trim(),
+      telefone: formatPhoneBr(String(hint.telefone || "")),
+      email: "",
+      statusContrato: "novo_lead",
+      plano: mapPlanToOption(String(hint.plano || "")),
+      dataReferencia: hint.dataReferencia || ""
+    });
+    setIsCreatingClient(true);
+    setClientsPage(1);
+    onConsumedAuditCreatePrefill?.();
+  }, [auditCreatePrefill, isLoading, clientsRaw, onConsumedAuditCreatePrefill]);
+
   const [editForm, setEditForm] = useState({
     nome: "",
     telefone: "",
@@ -152,6 +188,23 @@ export function ClientsPanel({
     plano: "",
     dataReferencia: ""
   });
+
+  const [createForm, setCreateForm] = useState({
+    nome: "",
+    telefone: "",
+    email: "",
+    statusContrato: "novo_lead",
+    plano: "",
+    dataReferencia: ""
+  });
+
+  const editTimeline = useMemo(() => {
+    const key = normalizeText(editForm.nome || "");
+    if (!key) return [];
+    return (auditLogs || [])
+      .filter((r) => normalizeText(String(r.cliente || "")) === key)
+      .slice(0, 40);
+  }, [auditLogs, editForm.nome]);
 
   const byStatus = stats.byStatus || {};
   const statusDistribSum = STATUS_ORDER.reduce((acc, k) => acc + (byStatus[k] || 0), 0);
@@ -246,7 +299,7 @@ export function ClientsPanel({
   const searched = useMemo(() => {
     const stageFilter = Number(clientStage || 0);
     return (clientsRaw || []).filter((c) => {
-      if (!includesSearch(c as Record<string, unknown>, clientSearch)) return false;
+      if (!includesSearch(c as Record<string, unknown>, clientSearchDebounced)) return false;
       if (!stageFilter) return true;
       if (String(c?.statusContrato || "") !== "cliente") return false;
       const stage = getClienteEtapaMes(getClientStageBaseDate(c));
@@ -254,7 +307,7 @@ export function ClientsPanel({
       if (stageFilter >= 12) return stage >= 12;
       return stage === stageFilter;
     });
-  }, [clientsRaw, clientSearch, clientStage]);
+  }, [clientsRaw, clientSearchDebounced, clientStage]);
 
   const totalResults = searched.length;
   const totalPages = Math.max(1, Math.ceil(totalResults / clientsPageSize));
@@ -269,9 +322,65 @@ export function ClientsPanel({
       telefone: formatPhoneBr(String(c.telefone || "")),
       email: String(c.email || ""),
       statusContrato: String(c.statusContrato || "cliente"),
-      plano: String(c.plano || ""),
+      plano: mapPlanToOption(String(c.plano || "")),
       dataReferencia: c.dataReferencia ? String(c.dataReferencia).slice(0, 10) : ""
     });
+  }
+
+  function openCreateClient() {
+    setCreateForm({
+      nome: "",
+      telefone: "",
+      email: "",
+      statusContrato: "novo_lead",
+      plano: "",
+      dataReferencia: ""
+    });
+    setIsCreatingClient(true);
+  }
+
+  async function saveCreateClient() {
+    if (!createForm.nome.trim()) {
+      onToast("Nome é obrigatório.");
+      return;
+    }
+    const dup = findClientNameDuplicate(clientsRaw, createForm.nome.trim());
+    if (dup && !window.confirm(`Já existe um cliente com o mesmo nome normalizado: "${dup}". Criar mesmo assim?`)) {
+      return;
+    }
+    if (createForm.telefone && !hasValidPhoneBr(createForm.telefone)) {
+      onToast("Telefone inválido. Use (xx) x xxxx-xxxx.");
+      return;
+    }
+    try {
+      const r = await mindlawJson<{ data?: { _id?: unknown; id?: unknown } }>("/api/clients", {
+        method: "POST",
+        body: JSON.stringify({
+          nome: createForm.nome.trim(),
+          telefone: createForm.telefone.trim(),
+          email: createForm.email.trim(),
+          statusContrato: createForm.statusContrato,
+          plano: createForm.plano.trim(),
+          dataReferencia: createForm.dataReferencia || null
+        })
+      });
+      const raw = r.data?._id ?? r.data?.id;
+      const newId = raw != null ? String(raw) : "";
+      if (!newId) {
+        onToast("Cliente criado, mas a resposta não trouxe ID.");
+        setIsCreatingClient(false);
+        void onReload();
+        return;
+      }
+      if (!onClientCreated) {
+        onToast("Cliente criado.");
+      }
+      setIsCreatingClient(false);
+      await Promise.resolve(onReload());
+      onClientCreated?.(newId);
+    } catch (e) {
+      onToast((e as Error).message, "error");
+    }
   }
 
   async function saveEdit() {
@@ -300,7 +409,7 @@ export function ClientsPanel({
       setEditId(null);
       onReload();
     } catch (e) {
-      onToast((e as Error).message);
+      onToast((e as Error).message, "error");
     }
   }
 
@@ -311,7 +420,19 @@ export function ClientsPanel({
 
   return (
     <section className="space-y-6">
-      <h2 className="text-center text-2xl font-extrabold md:text-3xl">Clientes</h2>
+      <div className="flex items-center justify-center gap-3">
+        <h2 className="text-center text-2xl font-extrabold md:text-3xl">Clientes</h2>
+        <button
+          type="button"
+          aria-label="Novo cliente"
+          title="Novo cliente"
+          disabled={isLoading}
+          onClick={() => openCreateClient()}
+          className="bg-mindlaw-gold hover:bg-mindlaw-gold/80 text-mindlaw-dark font-bold p-2 rounded-full transition disabled:pointer-events-none disabled:opacity-40"
+        >
+          <Plus className="h-5 w-5" strokeWidth={2.5} />
+        </button>
+      </div>
 
       <div className="glass-card mx-auto grid max-w-5xl grid-cols-1 gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <label className="text-xs text-white/65">
@@ -557,7 +678,7 @@ export function ClientsPanel({
                 {c.nome}
               </button>
               <span
-                className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${clientStatusChipClass(st)}`}
+                className={`mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${clientContractStatusChipClass(st)}`}
               >
                 {CLIENT_STATUS_LABELS[st] || st}
               </span>
@@ -594,6 +715,109 @@ export function ClientsPanel({
         )}
       </div>
 
+      {isCreatingClient ? (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setIsCreatingClient(false)}
+          role="presentation"
+        >
+          <div
+            ref={createModalRef}
+            className="w-full max-w-md rounded-2xl border border-white/15 bg-mindlaw-teal p-5 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-labelledby="create-client-title"
+          >
+            <h3 id="create-client-title" className="text-lg font-bold text-mindlaw-gold">
+              Novo cliente
+            </h3>
+            <div className="mt-4 space-y-3 text-sm">
+              <label className="block text-xs text-white/65">
+                Nome
+                <input
+                  value={createForm.nome}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, nome: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
+                />
+              </label>
+              <label className="block text-xs text-white/65">
+                Telefone
+                <input
+                  type="tel"
+                  inputMode="numeric"
+                  autoComplete="tel"
+                  value={createForm.telefone}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, telefone: formatPhoneBr(e.target.value) }))}
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
+                  maxLength={16}
+                />
+              </label>
+              <label className="block text-xs text-white/65">
+                E-mail
+                <input
+                  value={createForm.email}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, email: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
+                />
+              </label>
+              <label className="block text-xs text-white/65">
+                Status
+                <select
+                  value={createForm.statusContrato}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, statusContrato: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
+                >
+                  {STATUS_ORDER.map((k) => (
+                    <option key={k} value={k}>
+                      {CLIENT_STATUS_LABELS[k]}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs text-white/65">
+                Plano
+                <select
+                  value={createForm.plano}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, plano: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
+                >
+                  {CLIENT_PLANO_FORM_OPTIONS.map((o) => (
+                    <option key={o.value || "sem_plano"} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-xs text-white/65">
+                Data de referência
+                <input
+                  type="date"
+                  value={createForm.dataReferencia}
+                  onChange={(e) => setCreateForm((f) => ({ ...f, dataReferencia: e.target.value }))}
+                  className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
+                />
+              </label>
+            </div>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setIsCreatingClient(false)}
+                className="rounded-xl border border-white/20 px-4 py-2 text-sm"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void saveCreateClient()}
+                className="rounded-xl bg-mindlaw-gold px-4 py-2 text-sm font-semibold text-mindlaw-dark"
+              >
+                Criar
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {editId ? (
         <div
           className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 p-4"
@@ -601,11 +825,27 @@ export function ClientsPanel({
           role="presentation"
         >
           <div
+            ref={editModalRef}
             className="w-full max-w-md rounded-2xl border border-white/15 bg-mindlaw-teal p-5 shadow-xl"
             onClick={(e) => e.stopPropagation()}
             role="dialog"
           >
             <h3 className="text-lg font-bold text-mindlaw-gold">Editar cliente</h3>
+            {editTimeline.length ? (
+              <div className="mt-3 max-h-36 overflow-y-auto rounded-lg border border-white/10 bg-mindlaw-dark/35 p-2 text-xs">
+                <p className="font-semibold uppercase tracking-wide text-mindlaw-gold/90">Histórico (auditoria)</p>
+                <ul className="mt-2 space-y-1.5 text-white/75">
+                  {editTimeline.map((r) => (
+                    <li key={r.id} className="border-b border-white/5 pb-1 last:border-0">
+                      <span className="font-medium text-mindlaw-gold/85">{r.origem}</span> ·{" "}
+                      {r.data ? new Date(String(r.data)).toLocaleDateString("pt-BR") : "—"} ·{" "}
+                      {r.status || "—"}
+                      <span className="mt-0.5 block text-[11px] text-white/55">{r.detalhe || "—"}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
             <div className="mt-4 space-y-3 text-sm">
               <label className="block text-xs text-white/65">
                 Nome
@@ -651,11 +891,17 @@ export function ClientsPanel({
               </label>
               <label className="block text-xs text-white/65">
                 Plano
-                <input
+                <select
                   value={editForm.plano}
                   onChange={(e) => setEditForm((f) => ({ ...f, plano: e.target.value }))}
                   className="mt-1 w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2"
-                />
+                >
+                  {CLIENT_PLANO_FORM_OPTIONS.map((o) => (
+                    <option key={o.value || "sem_plano"} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
               </label>
               <label className="block text-xs text-white/65">
                 Data de referência

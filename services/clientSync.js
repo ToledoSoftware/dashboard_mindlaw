@@ -94,20 +94,27 @@ async function ensureClientByName(nome, extra = {}) {
  */
 async function syncClientsFromSupport() {
   const names = new Set();
+  const latestSaleDateByCliente = new Map();
+  const saleDocs = await Sale.find({}).select("cliente data").lean();
+  saleDocs.forEach((doc) => {
+    const n = String(doc.cliente || "").trim();
+    if (!n) return;
+    names.add(n);
+    const d = doc.data ? new Date(doc.data) : null;
+    if (!d || Number.isNaN(d.getTime())) return;
+    const prev = latestSaleDateByCliente.get(n);
+    if (!prev || d > prev) latestSaleDateByCliente.set(n, d);
+  });
   const supportDocs = await Support.find({}).select("cliente").lean();
   supportDocs.forEach((doc) => {
-    const n = String(doc.cliente || "").trim();
-    if (n) names.add(n);
-  });
-  const saleDocs = await Sale.find({}).select("cliente").lean();
-  saleDocs.forEach((doc) => {
     const n = String(doc.cliente || "").trim();
     if (n) names.add(n);
   });
   const list = [...names];
   for (const nome of list) {
     try {
-      await ensureClientByName(nome, {});
+      const saleDate = latestSaleDateByCliente.get(nome);
+      await ensureClientByName(nome, saleDate ? { dataReferencia: saleDate } : {});
     } catch (err) {
       console.error("[MindLaw] sync cliente (suporte/venda):", nome, err.message);
     }

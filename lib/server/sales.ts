@@ -29,9 +29,15 @@ export async function postSale(payload: Record<string, unknown>) {
     motivoPerda: payload.motivoPerda || "Sem Motivo",
     funcionalidadeFaltante: justificativaMotivo,
     detalhamentoTecnico: payload.detalhamentoTecnico || "",
-    competidor: payload.competidor || ""
+    competidor: payload.competidor || "",
+    telefone: String(payload.telefone || "").trim(),
+    plano: String(payload.plano || "").trim()
   });
-  await ensureClientByName(payload.cliente as string, { plano: (payload.plano as string) || "" });
+  await ensureClientByName(payload.cliente as string, {
+    plano: (payload.plano as string) || "",
+    dataReferencia: payload.data,
+    telefone: String(payload.telefone || "").trim()
+  });
   return { data: sale, status: 201 };
 }
 
@@ -55,11 +61,16 @@ export async function putSale(id: string, payload: Record<string, unknown>) {
   }
   if (payload.detalhamentoTecnico !== undefined) patch.detalhamentoTecnico = payload.detalhamentoTecnico || "";
   if (payload.competidor !== undefined) patch.competidor = payload.competidor || "";
+  if (payload.telefone !== undefined) patch.telefone = String(payload.telefone || "").trim();
+  if (payload.plano !== undefined) patch.plano = String(payload.plano || "").trim();
   const updated = await Sale.findByIdAndUpdate(id, { $set: patch }, { new: true, runValidators: true });
   if (!updated) return { error: "Registro comercial não encontrado.", status: 404 };
-  if (payload.plano !== undefined) {
-    await ensureClientByName(updated.cliente, { plano: (payload.plano as string) || "" });
+  const extra: { dataReferencia: unknown; plano?: string; telefone?: string } = { dataReferencia: updated.data };
+  if (payload.plano !== undefined) extra.plano = String(payload.plano || "");
+  if (payload.telefone !== undefined) {
+    extra.telefone = String((updated as { telefone?: string }).telefone || "").trim();
   }
+  await ensureClientByName(updated.cliente as string, extra);
   return { data: updated, status: 200 };
 }
 

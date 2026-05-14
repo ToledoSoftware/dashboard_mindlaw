@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ExternalLink, Pencil, Trash2 } from "lucide-react";
 import { mindlawJson } from "@/lib/mindlawFetch";
 import { normalizeText } from "@/lib/stringUtils";
@@ -9,8 +9,16 @@ import { LogEditModal, type AuditLogRow } from "@/components/LogEditModal";
 import { copyToClipboard } from "@/lib/copyToClipboard";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonTableRows } from "@/components/SkeletonCard";
+import { useDebouncedValue } from "@/lib/useDebouncedValue";
 
 export type { AuditLogRow };
+
+export type AuditNavigateToClientPayload = {
+  nome: string;
+  telefone?: string;
+  plano?: string;
+  dataReferencia?: string;
+};
 
 export type InteractiveLogFilter =
   | null
@@ -32,9 +40,13 @@ type Props = {
   interactiveFilter: InteractiveLogFilter;
   onInteractiveFilter: (f: InteractiveLogFilter) => void;
   clientRowsForPlano: { nome: string; plano?: string; telefone?: string }[];
-  onRefresh: () => Promise<void>;
-  onToast: (msg: string) => void;
-  onGoToClients?: (clientName: string) => void;
+  onRefresh: () => void | Promise<void>;
+  onToast: (msg: string, variant?: "error") => void;
+  onGoToClients?: (ctx: AuditNavigateToClientPayload) => void;
+  logsTotal?: number;
+  logsHasMore?: boolean;
+  onLoadMoreLogs?: () => void;
+  isLoadingMoreLogs?: boolean;
 };
 
 const LOG_DETAIL_PREVIEW = 120;
@@ -69,6 +81,28 @@ function lookupTelefoneRaw(clientRows: { nome: string; telefone?: string }[], cl
   return String(hit?.telefone || "").trim();
 }
 
+function buildAuditNavigateToClientPayload(
+  r: AuditLogRow,
+  clientRows: { nome: string; telefone?: string; plano?: string }[]
+): AuditNavigateToClientPayload {
+  const nome = String(r.cliente || "").trim();
+  const p = (r.payload || {}) as { telefone?: string; plano?: string };
+  const telPayload = String(p.telefone || "").trim();
+  const planoPayload = String(p.plano || "").trim();
+  const tel = telPayload || lookupTelefoneRaw(clientRows, nome);
+  const plan = planoPayload || lookupPlano(clientRows, nome) || String(r.plano || "").trim();
+  let dataReferencia: string | undefined;
+  if (r.data) {
+    const d = new Date(r.data);
+    if (!Number.isNaN(d.getTime())) dataReferencia = d.toISOString().slice(0, 10);
+  }
+  const out: AuditNavigateToClientPayload = { nome };
+  if (tel) out.telefone = tel;
+  if (plan) out.plano = plan;
+  if (dataReferencia) out.dataReferencia = dataReferencia;
+  return out;
+}
+
 function formatPhoneBr(value: string) {
   const digits = String(value || "").replace(/\D/g, "").slice(0, 11);
   if (!digits) return "";
@@ -92,10 +126,24 @@ export function LogsAuditPanel({
   clientRowsForPlano,
   onRefresh,
   onToast,
-  onGoToClients
+  onGoToClients,
+  logsTotal,
+  logsHasMore,
+  onLoadMoreLogs,
+  isLoadingMoreLogs = false
 }: Props) {
   const [editRow, setEditRow] = useState<AuditLogRow | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [searchDraft, setSearchDraft] = useState(logsSearchTerm);
+  const debouncedSearch = useDebouncedValue(searchDraft, 280);
+
+  useEffect(() => {
+    setSearchDraft(logsSearchTerm);
+  }, [logsSearchTerm]);
+
+  useEffect(() => {
+    onLogsSearchTerm(debouncedSearch);
+  }, [debouncedSearch, onLogsSearchTerm]);
 
   const filtered = useMemo(() => {
     let list = [...(rows || [])];
@@ -132,8 +180,8 @@ export function LogsAuditPanel({
     if (logsFilterPlan) {
       list = list.filter((item) => planMatchesFilter(item.plano || "", logsFilterPlan));
     }
-    if (logsSearchTerm.trim()) {
-      const term = normalizeText(logsSearchTerm);
+    if (debouncedSearch.trim()) {
+      const term = normalizeText(debouncedSearch);
       list = list.filter((item) => {
         if (normalizeText(item.cliente).includes(term) || normalizeText(item.detalhe).includes(term)) return true;
         const p = item.payload || {};
@@ -160,7 +208,7 @@ export function LogsAuditPanel({
       });
     }
     return list;
-  }, [rows, auditTab, logsFilterPlan, logsSearchTerm, interactiveFilter]);
+  }, [rows, auditTab, logsFilterPlan, debouncedSearch, interactiveFilter]);
 
   async function handleDelete(row: AuditLogRow) {
     if (!window.confirm("Tem certeza que deseja apagar este lançamento? Esta ação não pode ser desfeita.")) return;
@@ -173,7 +221,7 @@ export function LogsAuditPanel({
       onToast("Lançamento apagado.");
       await onRefresh();
     } catch (e) {
-      onToast((e as Error).message);
+      onToast((e as Error).message, "error");
     }
   }
 
@@ -292,13 +340,32 @@ export function LogsAuditPanel({
         <label className="block min-w-[200px] flex-1 text-xs text-white/60">
           Busca
           <input
-            value={logsSearchTerm}
-            onChange={(e) => onLogsSearchTerm(e.target.value)}
+            value={searchDraft}
+            onChange={(e) => setSearchDraft(e.target.value)}
             placeholder="Cliente, detalhe, motivo…"
             className="mt-1 min-h-[44px] w-full rounded-xl border border-white/15 bg-mindlaw-dark/50 px-3 py-2 text-sm"
           />
         </label>
       </div>
+
+      {typeof logsTotal === "number" ? (
+        <p className="text-center text-xs text-white/50">
+          Carregados {rows.length} de {logsTotal} registos do período (comercial + suporte).
+        </p>
+      ) : null}
+
+      {logsHasMore && onLoadMoreLogs ? (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            disabled={isLoadingMoreLogs}
+            onClick={() => onLoadMoreLogs()}
+            className="rounded-xl border border-mindlaw-gold/40 bg-mindlaw-gold/10 px-4 py-2 text-xs font-semibold text-mindlaw-gold hover:bg-mindlaw-gold/20 disabled:opacity-50"
+          >
+            {isLoadingMoreLogs ? "A carregar…" : "Carregar mais registos"}
+          </button>
+        </div>
+      ) : null}
 
       {isLoading ? (
         <div className="overflow-x-auto rounded-2xl border border-white/10 p-2">
@@ -327,7 +394,10 @@ export function LogsAuditPanel({
             {filtered.map((r) => {
               const isNps = auditTab === "nps";
               const npsText = isNps ? buildNpsRespostasDisplay(r) : "";
-              const telRaw = lookupTelefoneRaw(clientRowsForPlano, r.cliente);
+              const p = r.payload || {};
+              const telRaw =
+                String((p as { telefone?: string }).telefone || "").trim() ||
+                lookupTelefoneRaw(clientRowsForPlano, r.cliente);
               const telDigits = telRaw.replace(/\D/g, "");
               const telDisplay = formatPhoneBr(telRaw);
               return (
@@ -346,10 +416,10 @@ export function LogsAuditPanel({
                       {onGoToClients ? (
                         <button
                           type="button"
-                          title="Abrir no Cliente"
-                          aria-label="Abrir no Cliente"
+                          title="Ir a Clientes — se não existir cadastro, abre Novo cliente com dados do lançamento"
+                          aria-label="Ir a Clientes"
                           className="inline-flex shrink-0 cursor-pointer rounded p-0.5 text-white/40 transition-colors hover:text-mindlaw-gold focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-mindlaw-gold/60"
-                          onClick={() => onGoToClients(r.cliente)}
+                          onClick={() => onGoToClients(buildAuditNavigateToClientPayload(r, clientRowsForPlano))}
                         >
                           <ExternalLink size={16} aria-hidden />
                         </button>
