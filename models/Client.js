@@ -15,7 +15,9 @@ const clientSchema = new mongoose.Schema(
       default: "cliente"
     },
     plano: { type: String, default: "", trim: true, maxlength: 40 },
-    dataReferencia: { type: Date }
+    dataReferencia: { type: Date },
+    /** Preenchido ao excluir; oculto nas listagens e ignorado no sync automático a partir de vendas/suporte. */
+    deletedAt: { type: Date, default: null, index: true }
   },
   { timestamps: true }
 );

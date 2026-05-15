@@ -82,6 +82,9 @@ async function ensureClientByName(nome, extra = {}) {
   const update = Object.keys(setOnInsert).length
     ? { $set: setPayload, $setOnInsert: setOnInsert }
     : { $set: setPayload };
+  if (extra.reactivate) {
+    update.$unset = { deletedAt: "" };
+  }
   return ClientModel.findOneAndUpdate(
     { chaveUnica },
     update,
@@ -110,8 +113,12 @@ async function syncClientsFromSupport() {
     const n = String(doc.cliente || "").trim();
     if (n) names.add(n);
   });
+  const deletedRows = await ClientModel.find({ deletedAt: { $ne: null } }).select("normalizedName").lean();
+  const deletedNames = new Set(deletedRows.map((r) => r.normalizedName).filter(Boolean));
+
   const list = [...names];
   for (const nome of list) {
+    if (deletedNames.has(normalizeKey(nome))) continue;
     try {
       const saleDate = latestSaleDateByCliente.get(nome);
       await ensureClientByName(nome, saleDate ? { dataReferencia: saleDate } : {});
@@ -173,6 +180,7 @@ async function getClientEntradaStats(query = {}) {
   if (range) {
     match.dataReferencia = { $gte: range.start, $lte: range.end };
   }
+  match.$or = [{ deletedAt: null }, { deletedAt: { $exists: false } }];
   const rows = await ClientModel.aggregate([
     { $match: match },
     { $group: { _id: { $ifNull: ["$statusContrato", "cliente"] }, count: { $sum: 1 } } }
@@ -219,17 +227,17 @@ async function listAllClientsSorted(query = {}) {
   } catch (err) {
     console.error("[MindLaw] syncClientsFromSupport:", err.message);
   }
-  const filter = {};
+  const filter = {
+    $and: [{ $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] }]
+  };
   const st = String(query.clientStatus || query.statusContrato || "").trim();
   if (st && STATUS_CONTRATO.includes(st)) filter.statusContrato = st;
   const planKey = String(query.clientPlan || "").trim().toLowerCase();
   if (planKey) {
     if (planKey === "sem_plano") {
-      filter.$or = [
-        { plano: { $exists: false } },
-        { plano: null },
-        { plano: "" }
-      ];
+      filter.$and.push({
+        $or: [{ plano: { $exists: false } }, { plano: null }, { plano: "" }]
+      });
     } else if (planKey === "outros") {
       filter.plano = { $regex: "^(?!.*starter)(?!.*premium)(?!.*advanced).+$", $options: "i" };
     } else {

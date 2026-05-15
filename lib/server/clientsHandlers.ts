@@ -210,9 +210,44 @@ export async function createClient(payload: Record<string, unknown>) {
     email: payload.email || "",
     statusContrato: payload.statusContrato,
     plano: payload.plano,
-    dataReferencia: payload.dataReferencia
+    dataReferencia: payload.dataReferencia,
+    reactivate: true
   });
   return { data: client, status: 201 };
+}
+
+function clienteNameRegex(nome: string) {
+  const esc = String(nome || "")
+    .trim()
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`^${esc}$`, "i");
+}
+
+export async function deleteClient(id: string) {
+  const { Client, Sale, Support } = await getCjsModels();
+  if (!id) return { error: "ID inválido.", status: 400 };
+  const existing = await Client.findById(id);
+  if (!existing) return { error: "Cliente não encontrado.", status: 404 };
+  if (existing.deletedAt) return { error: "Cliente já foi excluído.", status: 400 };
+
+  const nome = String(existing.nome || "").trim();
+  const re = clienteNameRegex(nome);
+  const [salesCount, supportCount] = await Promise.all([
+    Sale.countDocuments({ cliente: re }),
+    Support.countDocuments({ cliente: re })
+  ]);
+
+  const deleted = await Client.findByIdAndUpdate(
+    id,
+    { $set: { deletedAt: new Date() } },
+    { new: true }
+  );
+  return {
+    data: deleted,
+    status: 200,
+    salesCount,
+    supportCount
+  };
 }
 
 export async function updateClient(id: string, payload: Record<string, unknown>) {

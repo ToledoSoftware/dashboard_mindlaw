@@ -18,7 +18,7 @@ import { copyToClipboard } from "@/lib/copyToClipboard";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonCard, SkeletonChart } from "@/components/SkeletonCard";
 import type { AuditLogRow, AuditNavigateToClientPayload } from "@/components/LogsAuditPanel";
-import { Plus } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 import { useDebouncedValue } from "@/lib/useDebouncedValue";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { findClientNameDuplicate } from "@/lib/clientDuplicateHint";
@@ -142,6 +142,7 @@ export function ClientsPanel({
   const [clientsPage, setClientsPage] = useState(1);
   const [clientsPageSize, setClientsPageSize] = useState(25);
   const [editId, setEditId] = useState<string | null>(null);
+  const [isDeletingClient, setIsDeletingClient] = useState(false);
   const [isCreatingClient, setIsCreatingClient] = useState(false);
   const createModalRef = useRef<HTMLDivElement>(null);
   const editModalRef = useRef<HTMLDivElement>(null);
@@ -410,6 +411,33 @@ export function ClientsPanel({
       onReload();
     } catch (e) {
       onToast((e as Error).message, "error");
+    }
+  }
+
+  async function deleteEditClient() {
+    if (!editId) return;
+    const nome = editForm.nome.trim() || "este cliente";
+    const msg =
+      `Excluir "${nome}" da base de clientes?\n\n` +
+      "Os lançamentos comerciais e de suporte com este nome permanecem na auditoria. " +
+      "O cadastro não voltará a aparecer automaticamente enquanto existirem esses lançamentos.";
+    if (!window.confirm(msg)) return;
+    setIsDeletingClient(true);
+    try {
+      const r = await mindlawJson<{ salesCount?: number; supportCount?: number }>(`/api/clients/${editId}`, {
+        method: "DELETE"
+      });
+      const extra =
+        (r.salesCount || 0) + (r.supportCount || 0) > 0
+          ? ` (${r.salesCount || 0} comercial, ${r.supportCount || 0} suporte mantidos na auditoria.)`
+          : "";
+      onToast(`Cliente excluído.${extra}`);
+      setEditId(null);
+      await Promise.resolve(onReload());
+    } catch (e) {
+      onToast((e as Error).message, "error");
+    } finally {
+      setIsDeletingClient(false);
     }
   }
 
@@ -913,21 +941,34 @@ export function ClientsPanel({
                 />
               </label>
             </div>
-            <div className="mt-4 flex justify-end gap-2">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
               <button
                 type="button"
-                onClick={() => setEditId(null)}
-                className="rounded-xl border border-white/20 px-4 py-2 text-sm"
+                disabled={isDeletingClient}
+                onClick={() => void deleteEditClient()}
+                className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/40 px-3 py-2 text-sm text-rose-100 hover:bg-rose-500/15 disabled:opacity-50"
               >
-                Cancelar
+                <Trash2 className="h-4 w-4" aria-hidden />
+                Excluir
               </button>
-              <button
-                type="button"
-                onClick={() => void saveEdit()}
-                className="rounded-xl bg-mindlaw-gold px-4 py-2 text-sm font-semibold text-mindlaw-dark"
-              >
-                Salvar
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  disabled={isDeletingClient}
+                  onClick={() => setEditId(null)}
+                  className="rounded-xl border border-white/20 px-4 py-2 text-sm disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  disabled={isDeletingClient}
+                  onClick={() => void saveEdit()}
+                  className="rounded-xl bg-mindlaw-gold px-4 py-2 text-sm font-semibold text-mindlaw-dark disabled:opacity-50"
+                >
+                  Salvar
+                </button>
+              </div>
             </div>
           </div>
         </div>

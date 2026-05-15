@@ -87,7 +87,8 @@ router.post("/clients", async (req, res) => {
       email: payload.email || "",
       statusContrato: payload.statusContrato,
       plano: payload.plano,
-      dataReferencia: payload.dataReferencia
+      dataReferencia: payload.dataReferencia,
+      reactivate: true
     });
     return res.status(201).json({ status: "ok", data: client });
   } catch (error) {
@@ -124,6 +125,29 @@ router.put("/clients/:id", async (req, res) => {
     return res.json({ status: "ok", data: updated });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao atualizar cliente." });
+  }
+});
+
+router.delete("/clients/:id", async (req, res) => {
+  try {
+    const id = String(req.params.id || "").trim();
+    if (!id) return res.status(400).json({ error: "ID inválido." });
+    const existing = await Client.findById(id);
+    if (!existing) return res.status(404).json({ error: "Cliente não encontrado." });
+    if (existing.deletedAt) return res.status(400).json({ error: "Cliente já foi excluído." });
+
+    const nome = String(existing.nome || "").trim();
+    const esc = nome.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const re = new RegExp(`^${esc}$`, "i");
+    const [salesCount, supportCount] = await Promise.all([
+      Sale.countDocuments({ cliente: re }),
+      Support.countDocuments({ cliente: re })
+    ]);
+
+    const deleted = await Client.findByIdAndUpdate(id, { $set: { deletedAt: new Date() } }, { new: true });
+    return res.json({ status: "ok", data: deleted, salesCount, supportCount });
+  } catch (error) {
+    return res.status(400).json({ error: "Falha ao excluir cliente." });
   }
 });
 
