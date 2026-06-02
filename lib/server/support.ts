@@ -180,19 +180,16 @@ export async function putSupport(id: string, payload: Record<string, unknown>) {
 }
 
 export async function deleteSupport(id: string) {
-  const { Support, ensureClientByName } = await getCjsModels();
+  const { Support, ensureClientByName, countChurnRecordsForClientName } = await getCjsModels();
   const support = await Support.findById(id);
   if (!support) return { error: "Registro de suporte não encontrado.", status: 404 };
   const clientName = String(support.cliente || "").trim();
   const wasChurn = classifySupport(support.toObject()) === "churn";
   await Support.findByIdAndDelete(id);
   if (wasChurn && clientName) {
-    const remainingChurn = await Support.countDocuments({
-      registerType: "churn",
-      cliente: clientName
-    });
+    const remainingChurn = await countChurnRecordsForClientName(clientName);
     if (!remainingChurn) {
-      await ensureClientByName(clientName, { statusContrato: "cliente" });
+      await ensureClientByName(clientName, { statusContrato: "cliente", preserveExisting: true });
     }
   }
   return { status: 200 };

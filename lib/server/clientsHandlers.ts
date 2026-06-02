@@ -43,7 +43,7 @@ export function exportFilenameForSelection(sel: ExportSectionSelection): string 
 
 async function appendClientsSheetsToWorkbook(workbook: WorkBook, query: Record<string, string | undefined>) {
   const { listAllClientsSorted, getClientEntradaStats } = await getCjsModels();
-  const clients = (await listAllClientsSorted(query)) as Record<string, unknown>[];
+  const clients = (await listAllClientsSorted({ ...query, sync: "1" })) as Record<string, unknown>[];
   const rows = clients.map((c) => ({
     Nome: c.nome || "",
     "E-mail": c.email || "",
@@ -196,7 +196,7 @@ export async function exportDashboardBundleXlsx(
 
 export async function listClients(query: Record<string, string | undefined>, forForms?: boolean) {
   const { listAllClientsSorted } = await getCjsModels();
-  const q = forForms ? {} : query;
+  const q = forForms ? { forForms: "1", skipSync: "1" } : { ...query, skipSync: query.skipSync || "1" };
   const clients = await listAllClientsSorted(q);
   return { clients };
 }
@@ -208,7 +208,7 @@ export async function createClient(payload: Record<string, unknown>) {
   const client = await ensureClientByName(nome, {
     telefone: payload.telefone || "",
     email: payload.email || "",
-    statusContrato: payload.statusContrato,
+    statusContrato: payload.statusContrato || "novo_lead",
     plano: payload.plano,
     dataReferencia: payload.dataReferencia,
     reactivate: true
@@ -251,28 +251,27 @@ export async function deleteClient(id: string) {
 }
 
 export async function updateClient(id: string, payload: Record<string, unknown>) {
-  const { Client, computeChaveUnica } = await getCjsModels();
+  const { Client, ensureClientByName } = await getCjsModels();
   if (!id) return { error: "ID inválido.", status: 400 };
   const existing = await Client.findById(id);
   if (!existing) return { error: "Cliente não encontrado.", status: 404 };
-  const patch: Record<string, unknown> = {};
-  if (payload.nome !== undefined) {
-    const nome = String(payload.nome || "").trim();
-    if (!nome) return { error: "Nome é obrigatório.", status: 400 };
-    patch.nome = nome;
-    patch.normalizedName = nome.toLowerCase().trim().replace(/\s+/g, " ");
-  }
-  if (payload.telefone !== undefined) patch.telefone = String(payload.telefone || "").trim();
-  if (payload.email !== undefined) patch.email = String(payload.email || "").trim().toLowerCase();
-  if (payload.plano !== undefined) patch.plano = String(payload.plano || "").trim();
-  if (payload.statusContrato !== undefined) patch.statusContrato = payload.statusContrato;
+  if (existing.deletedAt) return { error: "Cliente foi excluído.", status: 400 };
+
+  const nome = payload.nome !== undefined ? String(payload.nome || "").trim() : String(existing.nome || "").trim();
+  if (!nome) return { error: "Nome é obrigatório.", status: 400 };
+
+  const extra: Record<string, unknown> = {
+    telefone: payload.telefone !== undefined ? payload.telefone : existing.telefone,
+    email: payload.email !== undefined ? payload.email : existing.email,
+    reactivate: true
+  };
+  if (payload.plano !== undefined) extra.plano = payload.plano;
+  if (payload.statusContrato !== undefined) extra.statusContrato = payload.statusContrato;
   if (payload.dataReferencia !== undefined) {
-    patch.dataReferencia = payload.dataReferencia ? new Date(payload.dataReferencia as string) : null;
+    extra.dataReferencia = payload.dataReferencia;
   }
-  const nextNome = patch.nome !== undefined ? patch.nome : existing.nome;
-  const nextEmail = patch.email !== undefined ? patch.email : existing.email;
-  const nextTel = patch.telefone !== undefined ? patch.telefone : existing.telefone;
-  patch.chaveUnica = computeChaveUnica(nextNome, nextEmail, nextTel);
-  const updated = await Client.findByIdAndUpdate(id, { $set: patch }, { new: true, runValidators: true });
+
+  const updated = await ensureClientByName(nome, extra);
+  if (!updated) return { error: "Falha ao atualizar cliente.", status: 400 };
   return { data: updated, status: 200 };
 }

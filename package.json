@@ -12,7 +12,8 @@
     "import:atividade": "node scripts/import-clientes-atividade.js",
     "data:lista": "node scripts/gerar-arquivo-lista-clientes.js",
     "sync:donos": "node scripts/sync-donos-escritorios.js",
-    "sync:cancelados-churn": "node scripts/sync-cancelados-churn.js"
+    "sync:cancelados-churn": "node scripts/sync-cancelados-churn.js",
+    "consolidate:clients": "node scripts/consolidate-duplicate-clients.js"
   },
   "engines": {
     "node": ">=18.0.0"

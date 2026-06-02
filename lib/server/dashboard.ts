@@ -1,3 +1,4 @@
+import { normalizeClientKey } from "../clientKey";
 import { getRangeFromQuery } from "../dateRange.js";
 import { getCjsModels } from "../cjsModels";
 import {
@@ -11,6 +12,8 @@ import {
   normalizeKey,
   startOfMonth
 } from "./filters";
+
+const NOT_DELETED_CLIENT = { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] };
 
 export async function getCommercialDashboard(query: Record<string, string | undefined>) {
   const { Sale, Support } = await getCjsModels();
@@ -77,13 +80,21 @@ export async function getSupportDashboard(query: Record<string, string | undefin
   const churnRows = supportRaw.filter(
     (item: Record<string, unknown>) => classifySupport(item) === "churn" && item.dataChurn
   );
-  const churnNames = [...new Set(churnRows.map((item: { cliente?: string }) => String(item.cliente || "").trim()).filter(Boolean))];
-  const clientRows = await Client.find({ nome: { $in: churnNames } })
-    .select("nome plano statusContrato")
+  const churnNorms = [
+    ...new Set(
+      churnRows
+        .map((item: { cliente?: string }) => normalizeClientKey(String(item.cliente || "")))
+        .filter(Boolean)
+    )
+  ];
+  const clientRows = await Client.find({
+    $and: [NOT_DELETED_CLIENT, { normalizedName: { $in: churnNorms } }]
+  })
+    .select("nome normalizedName plano statusContrato")
     .lean();
   const clientByName = new Map();
   for (const c of clientRows) {
-    const key = normalizeKey(c.nome);
+    const key = normalizeClientKey(c.normalizedName || c.nome);
     if (!key) continue;
     const current = clientByName.get(key);
     if (!current) {
@@ -132,7 +143,7 @@ export async function getSupportDashboard(query: Record<string, string | undefin
 
   let clients: unknown[] = [];
   try {
-    clients = (await listAllClientsSorted(query)) as unknown[];
+    clients = (await listAllClientsSorted({ ...query, skipSync: "1" })) as unknown[];
   } catch {
     clients = [];
   }

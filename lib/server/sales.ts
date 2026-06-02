@@ -1,3 +1,4 @@
+import { mapSaleStatusToClientContract } from "../clientContractStatus";
 import { getRangeFromQuery } from "../dateRange.js";
 import { getCjsModels } from "../cjsModels";
 import { extractJustificativa, filterDuplicatedLostSales, filterSalesByRange, motivoExigeJustificativa } from "./filters";
@@ -33,10 +34,12 @@ export async function postSale(payload: Record<string, unknown>) {
     telefone: String(payload.telefone || "").trim(),
     plano: String(payload.plano || "").trim()
   });
+  const statusContrato = mapSaleStatusToClientContract(payload.status as string);
   await ensureClientByName(payload.cliente as string, {
     plano: (payload.plano as string) || "",
     dataReferencia: payload.data,
-    telefone: String(payload.telefone || "").trim()
+    telefone: String(payload.telefone || "").trim(),
+    ...(statusContrato ? { statusContrato } : { saleStatus: payload.status })
   });
   return { data: sale, status: 201 };
 }
@@ -65,11 +68,22 @@ export async function putSale(id: string, payload: Record<string, unknown>) {
   if (payload.plano !== undefined) patch.plano = String(payload.plano || "").trim();
   const updated = await Sale.findByIdAndUpdate(id, { $set: patch }, { new: true, runValidators: true });
   if (!updated) return { error: "Registro comercial não encontrado.", status: 404 };
-  const extra: { dataReferencia: unknown; plano?: string; telefone?: string } = { dataReferencia: updated.data };
+  const extra: {
+    dataReferencia: unknown;
+    plano?: string;
+    telefone?: string;
+    statusContrato?: string;
+    saleStatus?: unknown;
+  } = { dataReferencia: updated.data };
   if (payload.plano !== undefined) extra.plano = String(payload.plano || "");
   if (payload.telefone !== undefined) {
     extra.telefone = String((updated as { telefone?: string }).telefone || "").trim();
   }
+  const statusContrato = mapSaleStatusToClientContract(
+    (payload.status !== undefined ? payload.status : updated.status) as string
+  );
+  if (statusContrato) extra.statusContrato = statusContrato;
+  else if (payload.status !== undefined) extra.saleStatus = payload.status;
   await ensureClientByName(updated.cliente as string, extra);
   return { data: updated, status: 200 };
 }

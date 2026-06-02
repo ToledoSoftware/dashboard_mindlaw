@@ -14,12 +14,7 @@ const Client = require("./models/Client");
 const authMiddleware = require("./middleware/authMiddleware");
 const authRoutes = require("./routes/auth");
 const apiRoutes = require("./routes/api");
-const {
-  listAllClientsSorted,
-  ensureClientByName,
-  syncClientsFromSupport,
-  importListaAtividadeIfNeeded
-} = require("./services/clientSync");
+const { ensureClientByName, syncClientsFromSupport, importListaAtividadeIfNeeded } = require("./services/clientSync");
 
 function extractIntegrationNpsFields(payload = {}) {
   return {
@@ -106,40 +101,16 @@ app.post("/api/integrations/nps", async (req, res) => {
       ...structured
     });
 
-    await ensureClientByName(parsed.value.cliente, { plano: String(req.body?.plano || "").trim() });
+    await ensureClientByName(parsed.value.cliente, {
+      plano: String(req.body?.plano || "").trim(),
+      telefone: String(req.body?.telefone || "").trim(),
+      dataReferencia: parsed.value.dataNPS
+    });
 
     return res.status(201).json({ status: "ok", data: support });
   } catch (error) {
     console.error("[MindLaw] integração nps:", error.message);
     return res.status(400).json({ error: "Falha ao salvar NPS na integração." });
-  }
-});
-
-// Clientes: rotas explícitas no app (evita 404 com sub-router em path vazio em alguns ambientes)
-app.get("/api/clients", authMiddleware, async (req, res) => {
-  try {
-    const clients = await listAllClientsSorted(req.query || {});
-    return res.json({ clients });
-  } catch (error) {
-    return res.status(500).json({ error: "Erro ao carregar clientes." });
-  }
-});
-
-app.post("/api/clients", authMiddleware, async (req, res) => {
-  try {
-    const payload = req.body || {};
-    const nome = String(payload.nome || "").trim();
-    if (!nome) return res.status(400).json({ error: "Nome é obrigatório." });
-    const client = await ensureClientByName(nome, {
-      telefone: payload.telefone || "",
-      email: payload.email || "",
-      statusContrato: payload.statusContrato,
-      plano: payload.plano,
-      dataReferencia: payload.dataReferencia
-    });
-    return res.status(201).json({ status: "ok", data: client });
-  } catch (error) {
-    return res.status(400).json({ error: "Falha ao salvar cliente." });
   }
 });
 

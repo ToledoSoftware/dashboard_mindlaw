@@ -12,7 +12,7 @@ const clientSchema = new mongoose.Schema(
     statusContrato: {
       type: String,
       enum: STATUS_CONTRATO,
-      default: "cliente"
+      default: "novo_lead"
     },
     plano: { type: String, default: "", trim: true, maxlength: 40 },
     dataReferencia: { type: Date },

@@ -127,7 +127,12 @@ export function LaunchCenter({
     }
     const r = await mindlawJson<{ data?: Record<string, unknown> }>("/api/clients", {
       method: "POST",
-      body: JSON.stringify({ nome: nomeInput, plano: novoPlano || "", telefone: novoTelefone.trim() })
+      body: JSON.stringify({
+        nome: nomeInput,
+        plano: novoPlano || salePlano || churnPlano || "",
+        telefone: novoTelefone.trim(),
+        statusContrato: tipo === "comercial" && saleStatus === "Ganho" ? "cliente" : "novo_lead"
+      })
     });
     const doc = (r?.data ?? r) as Record<string, unknown> | undefined;
     const id = clientIdFromDoc(doc);

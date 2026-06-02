@@ -1,3 +1,4 @@
+import { normalizeClientKey } from "../clientKey";
 import { getRangeFromQuery } from "../dateRange.js";
 import { getCjsModels } from "../cjsModels";
 import {
@@ -9,16 +10,24 @@ import {
   normalizeNameKey
 } from "./filters";
 
+const NOT_DELETED_CLIENT = { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] };
+
 export async function getLogs(query: Record<string, string | undefined>) {
   const { Sale, Support, Client, deriveCategoriaNps, buildNpsColumnMap } = await getCjsModels();
   const [salesRaw, support, clients] = await Promise.all([
     Sale.find().sort({ createdAt: -1 }).lean(),
     Support.find().sort({ createdAt: -1 }).lean(),
-    Client.find({}).select("nome plano telefone statusContrato").lean()
+    Client.find(NOT_DELETED_CLIENT).select("nome normalizedName plano telefone statusContrato").lean()
   ]);
-  const clientPlanByName = new Map(
-    clients.map((client: { nome: string; plano?: string }) => [normalizeNameKey(client.nome), client.plano || ""])
-  );
+  const clientPlanByName = new Map<string, string>();
+  for (const client of clients as { nome: string; normalizedName?: string; plano?: string; statusContrato?: string }[]) {
+    const key = normalizeClientKey(client.normalizedName || client.nome);
+    if (!key) continue;
+    const current = clientPlanByName.get(key);
+    if (!current || (client.plano && !current)) {
+      clientPlanByName.set(key, client.plano || "");
+    }
+  }
   const range = getRangeFromQuery(query);
   const sales = filterSalesByRange(filterDuplicatedLostSales(salesRaw, support), range);
   const supportFiltered = filterSupportByRange(support, range);

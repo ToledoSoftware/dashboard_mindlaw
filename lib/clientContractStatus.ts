@@ -1,5 +1,13 @@
 import { CLIENT_STATUS_LABELS } from "@/lib/dashboardQuery";
 
+/** Status da venda comercial → enum `Client.statusContrato` (espelha `mapComercialStatusParaStatus`). */
+export function mapSaleStatusToClientContract(saleStatus: string | undefined | null): string | null {
+  const s = String(saleStatus || "").trim();
+  if (s === "Ganho") return "cliente";
+  if (s === "Em Negociacao" || s === "Perdido") return "novo_lead";
+  return null;
+}
+
 /** Rótulo PT do `statusContrato` (mesmo texto da listagem de clientes). */
 export function clientContractStatusLabel(status: string | undefined | null): string {
   const k = String(status || "").trim();

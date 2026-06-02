@@ -1,14 +1,14 @@
 import type { DateRange } from "../dateRange.js";
+import { normalizeClientKey } from "../clientKey";
 
+/** Nome canônico para joins entre Sale, Support e Client. */
 export function normalizeNameKey(value: string | undefined) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
+  return normalizeClientKey(value);
 }
 
+/** Alias de `normalizeNameKey` (dedup churn/vendas). */
 export function normalizeKey(value: string | undefined) {
-  return String(value || "").trim().toLowerCase();
+  return normalizeClientKey(value);
 }
 
 export function classifySupport(doc: Record<string, unknown>): "churn" | "nps" {

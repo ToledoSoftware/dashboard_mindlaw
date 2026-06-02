@@ -4,7 +4,16 @@ const Sale = require("../models/Sale");
 const Support = require("../models/Support");
 const Client = require("../models/Client");
 const { getRangeFromQuery } = require("../lib/dateRange.js");
-const { ensureClientByName, listAllClientsSorted, getClientEntradaStats, computeChaveUnica } = require("../services/clientSync");
+const { mapComercialStatusParaStatus } = require("../lib/mapSituacaoCliente");
+const { normalizeClientKey } = require("../lib/normalizeClientKey");
+const {
+  ensureClientByName,
+  listAllClientsSorted,
+  getClientEntradaStats,
+  countChurnRecordsForClientName
+} = require("../services/clientSync");
+
+const NOT_DELETED_CLIENT = { $or: [{ deletedAt: null }, { deletedAt: { $exists: false } }] };
 const authMiddleware = require("../middleware/authMiddleware");
 const { deriveCategoriaNps, buildNpsColumnMap } = require("../lib/npsAudit");
 
@@ -21,10 +30,7 @@ const router = express.Router();
 router.use(authMiddleware);
 
 function normalizeNameKey(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, " ");
+  return normalizeClientKey(value);
 }
 
 router.get("/clients/export", async (_req, res) => {
@@ -69,7 +75,9 @@ router.get("/clients/export", async (_req, res) => {
 router.get("/clients", async (_req, res) => {
   try {
     const forForms = String(_req.query.forForms || "") === "1";
-    const query = forForms ? {} : (_req.query || {});
+    const query = forForms
+      ? { forForms: "1", skipSync: "1" }
+      : { ...(_req.query || {}), skipSync: _req.query?.skipSync || "1" };
     const clients = await listAllClientsSorted(query);
     return res.json({ clients });
   } catch (error) {
@@ -85,7 +93,7 @@ router.post("/clients", async (req, res) => {
     const client = await ensureClientByName(nome, {
       telefone: payload.telefone || "",
       email: payload.email || "",
-      statusContrato: payload.statusContrato,
+      statusContrato: payload.statusContrato || "novo_lead",
       plano: payload.plano,
       dataReferencia: payload.dataReferencia,
       reactivate: true
@@ -102,26 +110,19 @@ router.put("/clients/:id", async (req, res) => {
     if (!id) return res.status(400).json({ error: "ID inválido." });
     const existing = await Client.findById(id);
     if (!existing) return res.status(404).json({ error: "Cliente não encontrado." });
+    if (existing.deletedAt) return res.status(400).json({ error: "Cliente foi excluído." });
     const payload = req.body || {};
-    const patch = {};
-    if (payload.nome !== undefined) {
-      const nome = String(payload.nome || "").trim();
-      if (!nome) return res.status(400).json({ error: "Nome é obrigatório." });
-      patch.nome = nome;
-      patch.normalizedName = nome.toLowerCase().trim().replace(/\s+/g, " ");
-    }
-    if (payload.telefone !== undefined) patch.telefone = String(payload.telefone || "").trim();
-    if (payload.email !== undefined) patch.email = String(payload.email || "").trim().toLowerCase();
-    if (payload.plano !== undefined) patch.plano = String(payload.plano || "").trim();
-    if (payload.statusContrato !== undefined) patch.statusContrato = payload.statusContrato;
-    if (payload.dataReferencia !== undefined) {
-      patch.dataReferencia = payload.dataReferencia ? new Date(payload.dataReferencia) : null;
-    }
-    const nextNome = patch.nome !== undefined ? patch.nome : existing.nome;
-    const nextEmail = patch.email !== undefined ? patch.email : existing.email;
-    const nextTel = patch.telefone !== undefined ? patch.telefone : existing.telefone;
-    patch.chaveUnica = computeChaveUnica(nextNome, nextEmail, nextTel);
-    const updated = await Client.findByIdAndUpdate(id, { $set: patch }, { new: true, runValidators: true });
+    const nome = payload.nome !== undefined ? String(payload.nome || "").trim() : String(existing.nome || "").trim();
+    if (!nome) return res.status(400).json({ error: "Nome é obrigatório." });
+    const extra = {
+      telefone: payload.telefone !== undefined ? payload.telefone : existing.telefone,
+      email: payload.email !== undefined ? payload.email : existing.email,
+      reactivate: true
+    };
+    if (payload.plano !== undefined) extra.plano = payload.plano;
+    if (payload.statusContrato !== undefined) extra.statusContrato = payload.statusContrato;
+    if (payload.dataReferencia !== undefined) extra.dataReferencia = payload.dataReferencia;
+    const updated = await ensureClientByName(nome, extra);
     return res.json({ status: "ok", data: updated });
   } catch (error) {
     return res.status(400).json({ error: "Falha ao atualizar cliente." });
@@ -298,10 +299,12 @@ router.post("/sales", async (req, res) => {
       telefone: String(payload.telefone || "").trim(),
       plano: String(payload.plano || "").trim()
     });
+    const statusContrato = mapComercialStatusParaStatus(payload.status);
     await ensureClientByName(payload.cliente, {
       plano: payload.plano || "",
       dataReferencia: payload.data,
-      telefone: String(payload.telefone || "").trim()
+      telefone: String(payload.telefone || "").trim(),
+      ...(statusContrato ? { statusContrato } : { saleStatus: payload.status })
     });
     return res.status(201).json({ status: "ok", data: sale });
   } catch (error) {
@@ -338,6 +341,11 @@ router.put("/sales/:id", async (req, res) => {
     const extra = { dataReferencia: updated.data };
     if (payload.plano !== undefined) extra.plano = payload.plano || "";
     if (payload.telefone !== undefined) extra.telefone = String(updated.telefone || "").trim();
+    const statusContrato = mapComercialStatusParaStatus(
+      payload.status !== undefined ? payload.status : updated.status
+    );
+    if (statusContrato) extra.statusContrato = statusContrato;
+    else if (payload.status !== undefined) extra.saleStatus = payload.status;
     await ensureClientByName(updated.cliente, extra);
     return res.json({ status: "ok", data: updated });
   } catch (error) {
@@ -548,12 +556,9 @@ router.delete("/support/:id", async (req, res) => {
     const wasChurn = classifySupport(support) === "churn";
     await Support.findByIdAndDelete(id);
     if (wasChurn && clientName) {
-      const remainingChurn = await Support.countDocuments({
-        registerType: "churn",
-        cliente: clientName
-      });
+      const remainingChurn = await countChurnRecordsForClientName(clientName);
       if (!remainingChurn) {
-        await ensureClientByName(clientName, { statusContrato: "cliente" });
+        await ensureClientByName(clientName, { statusContrato: "cliente", preserveExisting: true });
       }
     }
     return res.json({ status: "ok" });
@@ -729,13 +734,19 @@ router.get("/support/dashboard", async (_req, res) => {
     const churnByMonth = Array.from({ length: 12 }, () => 0);
     const churnDetailsByMonth = Array.from({ length: 12 }, () => []);
     const churnRows = supportRaw.filter((item) => classifySupport(item) === "churn" && item.dataChurn);
-    const churnNames = [...new Set(churnRows.map((item) => String(item.cliente || "").trim()).filter(Boolean))];
-    const clientRows = await Client.find({ nome: { $in: churnNames } })
-      .select("nome plano statusContrato")
+    const churnNorms = [
+      ...new Set(
+        churnRows.map((item) => normalizeClientKey(String(item.cliente || ""))).filter(Boolean)
+      )
+    ];
+    const clientRows = await Client.find({
+      $and: [NOT_DELETED_CLIENT, { normalizedName: { $in: churnNorms } }]
+    })
+      .select("nome normalizedName plano statusContrato")
       .lean();
     const clientByName = new Map();
     for (const c of clientRows) {
-      const key = normalizeKey(c.nome);
+      const key = normalizeClientKey(c.normalizedName || c.nome);
       if (!key) continue;
       const current = clientByName.get(key);
       if (!current) {
@@ -784,7 +795,7 @@ router.get("/support/dashboard", async (_req, res) => {
 
     let clients = [];
     try {
-      clients = await listAllClientsSorted(_req.query || {});
+      clients = await listAllClientsSorted({ ...(_req.query || {}), skipSync: "1" });
     } catch (err) {
       console.error("[MindLaw] listAllClientsSorted:", err.message);
       clients = [];
@@ -824,11 +835,17 @@ router.get("/logs", async (_req, res) => {
     const [salesRaw, support, clients] = await Promise.all([
       Sale.find().sort({ createdAt: -1 }).lean(),
       Support.find().sort({ createdAt: -1 }).lean(),
-      Client.find({}).select("nome plano telefone statusContrato").lean()
+      Client.find(NOT_DELETED_CLIENT).select("nome normalizedName plano telefone statusContrato").lean()
     ]);
-    const clientPlanByName = new Map(
-      clients.map((client) => [normalizeNameKey(client.nome), client.plano || ""])
-    );
+    const clientPlanByName = new Map();
+    for (const client of clients) {
+      const key = normalizeClientKey(client.normalizedName || client.nome);
+      if (!key) continue;
+      const current = clientPlanByName.get(key);
+      if (!current || (client.plano && !current)) {
+        clientPlanByName.set(key, client.plano || "");
+      }
+    }
     const range = getRangeFromQuery(_req.query);
     const sales = filterSalesByRange(filterDuplicatedLostSales(salesRaw, support), range);
     const supportFiltered = filterSupportByRange(support, range);

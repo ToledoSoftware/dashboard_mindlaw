@@ -19,6 +19,7 @@ export type CjsModels = {
   computeChaveUnica: (...args: any[]) => string;
   importListaAtividadeIfNeeded: () => Promise<{ ran: boolean; count: number; reason: string }>;
   syncClientsFromSupport: () => Promise<void>;
+  countChurnRecordsForClientName: (name: string) => Promise<number>;
   deriveCategoriaNps: (item: unknown) => string;
   buildNpsColumnMap: (item: unknown) => unknown;
 };
@@ -48,6 +49,7 @@ export async function getCjsModels(): Promise<CjsModels> {
     computeChaveUnica: cs.computeChaveUnica,
     importListaAtividadeIfNeeded: cs.importListaAtividadeIfNeeded,
     syncClientsFromSupport: cs.syncClientsFromSupport,
+    countChurnRecordsForClientName: cs.countChurnRecordsForClientName,
     deriveCategoriaNps: na.deriveCategoriaNps,
     buildNpsColumnMap: na.buildNpsColumnMap
   };
